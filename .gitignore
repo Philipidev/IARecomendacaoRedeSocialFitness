@@ -1,0 +1,60 @@
+# ── Python ────────────────────────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.so
+*.egg
+*.egg-info/
+dist/
+build/
+.eggs/
+.Python
+env/
+venv/
+.venv/
+pip-wheel-metadata/
+.cursor/
+.claude/
+
+# ── Jupyter ───────────────────────────────────────────────────────────────────
+.ipynb_checkpoints/
+*.ipynb
+
+# ── Dataset bruto ─────────────────────────────────────────────────────────────
+extracao_filtragem/dataset/
+extracao_filtragem/ldbc_snb/
+
+# ── Parquets gerados pelo pipeline ────────────────────────────────────────────
+extracao_filtragem/output/
+
+# ── Artefatos intermediários de treinamento ───────────────────────────────────
+treinamento/dados/
+
+# ── Artefatos do modelo treinado ──────────────────────────────────────────────
+treinamento/modelo/
+
+# ── Scripts temporários de manutenção ─────────────────────────────────────────
+fix_readme*.py
+
+# ── Editores / IDEs ───────────────────────────────────────────────────────────
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# ── OS ────────────────────────────────────────────────────────────────────────
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# ── Variáveis de ambiente ─────────────────────────────────────────────────────
+.env
+.env.*
+*.env
+
+# ── Logs e temporários ────────────────────────────────────────────────────────
+*.log
+*.tmp
+*.bak
