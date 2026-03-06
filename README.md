@@ -123,9 +123,13 @@ python treinamento/recomendar.py --tags "Born_to_Run,Superunknown" --timestamp 1
 
 # Top 5 posts mais próximos no tempo e por tags
 python treinamento/recomendar.py --tags "Running_Free" --timestamp 1300000000000 --top-k 5
+
+# Ajustar o peso da popularidade no score final
+python treinamento/recomendar.py --tags "Running_Free" --timestamp 1300000000000 --peso-popularidade 0.20
 ```
 
 ### 5. Recomendar via Python
+
 
 ```python
 from treinamento.recomendar import recomendar
@@ -138,16 +142,27 @@ df = recomendar(
 print(df)
 ```
 
+### 6. Avaliar impacto da popularidade (antes/depois)
+
+```bash
+# Avaliação real (quando houver artefatos de treino + splits)
+python avaliacao/avaliar_popularidade.py --k 10 --peso-depois 0.10
+
+# Avaliação demo (fallback sem dataset local)
+python avaliacao/avaliar_popularidade.py --demo --k 10 --peso-depois 0.10
+```
+
 ### Arquitetura do modelo
 
-O score de relevância combina quatro sinais:
+O score de relevância combina cinco sinais:
 
 | Sinal | Peso | Descrição |
 |---|---|---|
-| Similaridade de conteúdo | 0.40 | Coseno entre vetores de tags (MultiLabelBinarizer) |
+| Similaridade de conteúdo | 0.35 | Coseno entre vetores de tags (MultiLabelBinarizer) |
 | Co-ocorrência de tags | 0.25 | Boost para tags relacionadas que também aparecem no post |
 | Recência relativa | 0.15 | Decaimento exponencial pela distância em dias ao timestamp de entrada |
-| Influência social | 0.20 | Soma do grau dos usuários que interagiram com o post no grafo social |
+| Influência social | 0.15 | Soma do grau dos usuários que interagiram com o post no grafo social |
+| Popularidade de tags | 0.10 (configurável) | Volume histórico de interações das tags do post (`popularidade.npy`) |
 
 **Entradas:**
 - `tags: List[str]` — nomes das tags (valores, não IDs)

@@ -121,6 +121,9 @@ python treinamento/recomendar.py --tags "Born_to_Run,Superunknown" --timestamp 1
 # Limitar a 5 recomendações
 python treinamento/recomendar.py --tags "Running_Free" --timestamp 1300000000000 --top-k 5
 
+# Ajustar o peso de popularidade no score final
+python treinamento/recomendar.py --tags "Running_Free" --timestamp 1300000000000 --peso-popularidade 0.20
+
 # Incluir posts com conjunto de tags idêntico à entrada
 python treinamento/recomendar.py --tags "Running_Free" --timestamp 1300000000000 --incluir-exatas
 ```
@@ -147,6 +150,7 @@ print(df)
 | `tags` | `List[str]` | Nomes das tags do post de referência (valores, não IDs) |
 | `timestamp` | `int` | Timestamp em milissegundos do post de referência |
 | `top_k` | `int` | Número de posts recomendados (padrão: 10) |
+| `peso_popularidade` | `float` | Peso do sinal de popularidade no score final (padrão: 0.10) |
 
 ### Saída
 
@@ -163,18 +167,19 @@ DataFrame com os posts mais relevantes — **sem nenhum ID exposto**:
 
 ## Arquitetura do modelo
 
-O score de relevância é calculado combinando quatro sinais independentes:
+O score de relevância é calculado combinando cinco sinais independentes:
 
 ```
-score = 0.40 × cosine_sim + 0.25 × cooccurrence_boost + 0.15 × time_decay + 0.20 × social_influence
+score = 0.35 × cosine_sim + 0.25 × cooccurrence_boost + 0.15 × time_decay + 0.15 × social_influence + peso_popularidade × popularity_signal
 ```
 
 | Sinal | Peso | Como funciona |
 |---|---|---|
-| **Similaridade de conteúdo** | 0.40 | Coseno entre o vetor de tags da entrada e o de cada post. Posts com as mesmas tags recebem score máximo. |
+| **Similaridade de conteúdo** | 0.35 | Coseno entre o vetor de tags da entrada e o de cada post. Posts com as mesmas tags recebem score máximo. |
 | **Co-ocorrência de tags** | 0.25 | Expande as tags de entrada com tags relacionadas (do `tag_cooccurrence.parquet`) e aplica boost nos posts que as contêm. Descobre conteúdo que pessoas com gostos parecidos também curtem. |
 | **Recência relativa** | 0.15 | Decaimento exponencial `exp(-0.01 × Δdias)` pela distância em dias entre o timestamp de entrada e o do post. Posts temporalmente próximos recebem maior peso. |
-| **Influência social** | 0.20 | Soma do grau (número de conexões no grafo social) dos usuários que interagiram com cada post. Posts curtidos por usuários influentes (altamente conectados) recebem score mais alto. |
+| **Influência social** | 0.15 | Soma do grau (número de conexões no grafo social) dos usuários que interagiram com cada post. Posts curtidos por usuários influentes (altamente conectados) recebem score mais alto. |
+| **Popularidade** | 0.10 (configurável) | Intensidade histórica de interações nas tags do post (`popularidade.npy`). Pode ser ajustada no CLI/API com `peso_popularidade`. |
 
 ### Exemplo de co-ocorrência
 
@@ -252,22 +257,23 @@ n_treino    = total − n_validação − n_teste  ← absorve qualquer arredond
 
 Nenhum registro é perdido: o arredondamento vai sempre para o treino.
 
-### Os quatro sinais do score de relevância
+### Os cinco sinais do score de relevância
 
-Quando você pede uma recomendação, o modelo combina quatro sinais para calcular o `relevance_score` de cada post:
+Quando você pede uma recomendação, o modelo combina cinco sinais para calcular o `relevance_score` de cada post:
 
 ```
-score = 0.40 × similaridade_conteudo
+score = 0.35 × similaridade_conteudo
       + 0.25 × boost_coocorrencia
       + 0.15 × fator_recencia
-      + 0.20 × influencia_social
+      + 0.15 × influencia_social
+      + peso_popularidade × sinal_popularidade
 ```
 
-**1. Similaridade de conteúdo (peso 0.40 — o mais importante)**
+**1. Similaridade de conteúdo (peso 0.35 — o mais importante)**
 
 Compara matematicamente as tags do post de entrada com as tags de cada post do catálogo. Usa o algoritmo de similaridade de cosseno: posts com as mesmas tags recebem score 1.0; posts sem nenhuma tag em comum recebem 0.0.
 
-*Peso alto (0.40) porque relevância de conteúdo é o critério principal de recomendação.*
+*Peso alto (0.35) porque relevância de conteúdo é o critério principal de recomendação.*
 
 **2. Boost de co-ocorrência (peso 0.25 — descoberta)**
 
@@ -281,7 +287,7 @@ Posts temporalmente próximos ao timestamp de entrada recebem pontuação maior.
 
 *Peso menor (0.15) porque relevância de conteúdo deve prevalecer sobre data.*
 
-**4. Influência social (peso 0.20 — alcance no grafo)**
+**4. Influência social (peso 0.15 — alcance no grafo)**
 
 Cada usuário tem um **grau** no grafo social: o número de amigos que possui. Quando um usuário altamente conectado (influenciador) interage com um post, esse post provavelmente é relevante para muita gente. O sinal é pré-calculado no treino usando o `user_social_graph.parquet`, sem precisar da identidade do usuário em tempo de inferência.
 
@@ -289,7 +295,8 @@ Cada usuário tem um **grau** no grafo social: o número de amigos que possui. Q
 
 | Sinal | Peso | O que prioriza |
 |---|---|---|
-| Similaridade de conteúdo | 0.40 | Posts com as mesmas tags |
+| Similaridade de conteúdo | 0.35 | Posts com as mesmas tags |
 | Co-ocorrência de tags | 0.25 | Posts com tags relacionadas (descoberta) |
 | Recência relativa | 0.15 | Posts temporalmente próximos |
-| Influência social | 0.20 | Posts curtidos por usuários influentes |
+| Influência social | 0.15 | Posts curtidos por usuários influentes |
+| Popularidade | 0.10 (configurável) | Posts com tags historicamente mais engajadas |

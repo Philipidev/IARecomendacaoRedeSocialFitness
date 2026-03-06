@@ -5,11 +5,12 @@ Carrega os artefatos treinados e expõe a função principal:
 
     recomendar(tags, timestamp, top_k=10) -> pd.DataFrame
 
-O score de relevância combina quatro sinais:
-  - Similaridade de conteúdo  (0.40): coseno entre o vetor de tags de entrada e cada post
+O score de relevância combina cinco sinais:
+  - Similaridade de conteúdo  (0.35): coseno entre o vetor de tags de entrada e cada post
   - Co-ocorrência de tags     (0.25): boost para posts que contêm tags relacionadas às de entrada
   - Recência relativa         (0.15): decaimento exponencial pela distância temporal em dias
-  - Influência social         (0.20): soma dos graus dos usuários que interagiram com o post
+  - Influência social         (0.15): soma dos graus dos usuários que interagiram com o post
+  - Popularidade              (0.10): volume histórico de interações nas tags do post
 
 Entradas:
     tags      : List[str]  — nomes das tags (valores, não IDs)
@@ -44,10 +45,11 @@ DADOS_DIR = ROOT / "treinamento" / "dados"
 MODELO_DIR = ROOT / "treinamento" / "modelo"
 
 # Pesos do score híbrido
-PESO_COSINE = 0.40
+PESO_COSINE = 0.35
 PESO_COOC = 0.25
 PESO_TIME = 0.15
-PESO_SOCIAL = 0.20
+PESO_SOCIAL = 0.15
+PESO_POPULARIDADE = 0.10
 
 # Lambda do decaimento temporal (por dia)
 LAMBDA_DECAY = 0.01
@@ -177,6 +179,15 @@ class ModeloRecomendacao:
             return self._social_scores
         return np.zeros(len(self._posts), dtype=np.float32)
 
+    def _score_popularidade(self) -> np.ndarray:
+        """
+        Retorna o vetor de popularidade pré-computado (normalizado em [0,1]).
+        Se o artefato não foi carregado, retorna zeros.
+        """
+        if self._popularidade is not None and len(self._popularidade) == len(self._posts):
+            return self._popularidade
+        return np.zeros(len(self._posts), dtype=np.float32)
+
     def _score_time_decay(self, timestamp_entrada: int) -> np.ndarray:
         """Decaimento exponencial pela distância temporal em dias."""
         timestamps_posts = self._posts["creation_date"].values.astype(np.float64)
@@ -194,6 +205,7 @@ class ModeloRecomendacao:
         timestamp: int,
         top_k: int = 10,
         excluir_tags_exatas: bool = True,
+        peso_popularidade: float = PESO_POPULARIDADE,
     ) -> pd.DataFrame:
         """
         Retorna os top_k posts mais relevantes dado um conjunto de tags e timestamp.
@@ -227,8 +239,15 @@ class ModeloRecomendacao:
         si = self._score_cooccurrence(tags_norm)
         st = self._score_time_decay(timestamp)
         ss = self._score_social()
+        sp = self._score_popularidade()
 
-        score_final = PESO_COSINE * sc + PESO_COOC * si + PESO_TIME * st + PESO_SOCIAL * ss
+        score_final = (
+            PESO_COSINE * sc
+            + PESO_COOC * si
+            + PESO_TIME * st
+            + PESO_SOCIAL * ss
+            + peso_popularidade * sp
+        )
 
         resultado = self._posts.copy()
         resultado["relevance_score"] = score_final.round(4)
@@ -271,6 +290,7 @@ def recomendar(
     timestamp: int,
     top_k: int = 10,
     excluir_tags_exatas: bool = True,
+    peso_popularidade: float = PESO_POPULARIDADE,
 ) -> pd.DataFrame:
     """
     Função de alto nível para recomendação de posts fitness.
@@ -285,6 +305,8 @@ def recomendar(
         Quantos posts recomendar (padrão: 10).
     excluir_tags_exatas : bool
         Remove posts com conjunto de tags idêntico ao da entrada.
+    peso_popularidade : float
+        Peso do sinal de popularidade no score final (padrão: 0.10).
 
     Retorna
     -------
@@ -296,7 +318,7 @@ def recomendar(
     >>> df = recomendar(["Born_to_Run"], timestamp=1320000000000, top_k=5)
     >>> print(df)
     """
-    return _get_modelo().recomendar(tags, timestamp, top_k, excluir_tags_exatas)
+    return _get_modelo().recomendar(tags, timestamp, top_k, excluir_tags_exatas, peso_popularidade)
 
 
 # ------------------------------------------------------------------
@@ -331,6 +353,12 @@ Exemplos:
         help="Número de recomendações (padrão: 10)",
     )
     parser.add_argument(
+        "--peso-popularidade",
+        type=float,
+        default=PESO_POPULARIDADE,
+        help=f"Peso do sinal de popularidade no score final (padrão: {PESO_POPULARIDADE})",
+    )
+    parser.add_argument(
         "--listar-tags",
         action="store_true",
         help="Lista todas as tags conhecidas pelo modelo",
@@ -361,6 +389,7 @@ Exemplos:
     print(f"  Tags      : {tags_entrada}")
     print(f"  Timestamp : {args.timestamp}")
     print(f"  Top-K     : {args.top_k}")
+    print(f"  Peso pop. : {args.peso_popularidade}")
     print()
 
     df = modelo.recomendar(
@@ -368,6 +397,7 @@ Exemplos:
         timestamp=args.timestamp,
         top_k=args.top_k,
         excluir_tags_exatas=not args.incluir_exatas,
+        peso_popularidade=args.peso_popularidade,
     )
 
     if df.empty:
