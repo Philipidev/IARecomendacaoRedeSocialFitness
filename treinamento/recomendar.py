@@ -30,6 +30,7 @@ from __future__ import annotations
 
 import argparse
 import ast
+import json
 import math
 import pickle
 import sys
@@ -42,16 +43,47 @@ from sklearn.metrics.pairwise import cosine_similarity
 ROOT = Path(__file__).resolve().parent.parent
 DADOS_DIR = ROOT / "treinamento" / "dados"
 MODELO_DIR = ROOT / "treinamento" / "modelo"
+PESOS_OTIMOS_PATH = MODELO_DIR / "pesos_otimos.json"
 
-# Pesos do score híbrido
-PESO_COSINE = 0.40
-PESO_COOC = 0.25
-PESO_TIME = 0.15
-PESO_SOCIAL = 0.20
+# Pesos padrão do score híbrido
+PESO_COSINE_PADRAO = 0.40
+PESO_COOC_PADRAO = 0.25
+PESO_TIME_PADRAO = 0.15
+PESO_SOCIAL_PADRAO = 0.20
 
 # Lambda do decaimento temporal (por dia)
 LAMBDA_DECAY = 0.01
 MS_POR_DIA = 86_400_000
+
+
+def _carregar_pesos_otimos() -> tuple[float, float, float, float]:
+    """Carrega pesos otimizados quando disponíveis; caso contrário usa padrão."""
+    default = (PESO_COSINE_PADRAO, PESO_COOC_PADRAO, PESO_TIME_PADRAO, PESO_SOCIAL_PADRAO)
+
+    if not PESOS_OTIMOS_PATH.exists():
+        return default
+
+    try:
+        with open(PESOS_OTIMOS_PATH, "r", encoding="utf-8") as f:
+            payload = json.load(f)
+
+        pesos = (
+            float(payload["w_cos"]),
+            float(payload["w_cooc"]),
+            float(payload["w_time"]),
+            float(payload["w_social"]),
+        )
+
+        if any(w < 0 for w in pesos):
+            return default
+        if not math.isclose(sum(pesos), 1.0, rel_tol=0, abs_tol=1e-6):
+            return default
+        return pesos
+    except Exception:
+        return default
+
+
+PESO_COSINE, PESO_COOC, PESO_TIME, PESO_SOCIAL = _carregar_pesos_otimos()
 
 
 def _parse_tags(value) -> list[str]:
