@@ -14,6 +14,7 @@ treinamento/
 │   ├── posts_metadata.parquet           # Posts com apenas valores semânticos (sem IDs)
 │   ├── interacoes_por_tag.parquet       # Popularidade de cada tag por volume de interações
 │   ├── social_scores.parquet            # Score de influência social por post (dataset completo)
+│   ├── user_tag_profile.parquet         # Perfil usuário-tag (interesses + interações + vizinhos)
 │   ├── tag_lista.txt                    # Uma tag fitness por linha (alfabético)
 │   ├── event_type_lista.txt             # Tipos de evento únicos (like, create, reply)
 │   ├── language_lista.txt               # Idiomas únicos presentes nos posts
@@ -62,6 +63,7 @@ Lê os parquets de `extracao_filtragem/output/` e gera os artefatos intermediár
 - `posts_metadata.parquet` — posts com colunas semânticas (sem `message_id`), com `creation_date_iso` legível
 - `interacoes_por_tag.parquet` — contagem de interações por tag (like + create + reply)
 - `social_scores.parquet` — score de influência social por post, baseado no grau dos usuários que interagiram
+- `user_tag_profile.parquet` — afinidade usuário-tag combinando interesses explícitos, interações recentes e vizinhos no grafo social
 - `tag_lista.txt` — uma tag fitness por linha (alfabético)
 - `event_type_lista.txt` — tipos de evento únicos (like, create, reply)
 - `language_lista.txt` — idiomas únicos presentes nos posts (excluindo nulos)
@@ -118,11 +120,14 @@ python treinamento/recomendar.py --listar-tags
 # Recomendar posts a partir de tags e timestamp
 python treinamento/recomendar.py --tags "Born_to_Run,Superunknown" --timestamp 1320000000000
 
-# Limitar a 5 recomendações
-python treinamento/recomendar.py --tags "Running_Free" --timestamp 1300000000000 --top-k 5
+# Recomendar posts personalizados para um usuário
+python treinamento/recomendar.py --tags "Born_to_Run,Superunknown" --timestamp 1320000000000 --user-id 123
+
+# Limitar a 5 recomendações personalizadas
+python treinamento/recomendar.py --tags "Running_Free" --timestamp 1300000000000 --top-k 5 --user-id 123
 
 # Incluir posts com conjunto de tags idêntico à entrada
-python treinamento/recomendar.py --tags "Running_Free" --timestamp 1300000000000 --incluir-exatas
+python treinamento/recomendar.py --tags "Running_Free" --timestamp 1300000000000 --user-id 123 --incluir-exatas
 ```
 
 **Via Python:**
@@ -134,6 +139,7 @@ df = recomendar(
     tags=["Born_to_Run", "Superunknown"],
     timestamp=1320000000000,
     top_k=10,
+    user_id=123,
 )
 print(df)
 ```
@@ -147,6 +153,7 @@ print(df)
 | `tags` | `List[str]` | Nomes das tags do post de referência (valores, não IDs) |
 | `timestamp` | `int` | Timestamp em milissegundos do post de referência |
 | `top_k` | `int` | Número de posts recomendados (padrão: 10) |
+| `user_id` | `Optional[int]` | Identificador do usuário alvo para recomendação personalizada |
 
 ### Saída
 
@@ -163,18 +170,20 @@ DataFrame com os posts mais relevantes — **sem nenhum ID exposto**:
 
 ## Arquitetura do modelo
 
-O score de relevância é calculado combinando quatro sinais independentes:
+O score de relevância é calculado combinando quatro sinais no modo padrão e cinco sinais no modo personalizado (`user_id` informado):
 
 ```
-score = 0.40 × cosine_sim + 0.25 × cooccurrence_boost + 0.15 × time_decay + 0.20 × social_influence
+score_padrao = 0.40 × cosine_sim + 0.25 × cooccurrence_boost + 0.15 × time_decay + 0.20 × social_influence
+score_personalizado = 0.30 × cosine_sim + 0.20 × cooccurrence_boost + 0.15 × time_decay + 0.15 × social_influence + 0.20 × user_item_affinity
 ```
 
 | Sinal | Peso | Como funciona |
 |---|---|---|
-| **Similaridade de conteúdo** | 0.40 | Coseno entre o vetor de tags da entrada e o de cada post. Posts com as mesmas tags recebem score máximo. |
-| **Co-ocorrência de tags** | 0.25 | Expande as tags de entrada com tags relacionadas (do `tag_cooccurrence.parquet`) e aplica boost nos posts que as contêm. Descobre conteúdo que pessoas com gostos parecidos também curtem. |
-| **Recência relativa** | 0.15 | Decaimento exponencial `exp(-0.01 × Δdias)` pela distância em dias entre o timestamp de entrada e o do post. Posts temporalmente próximos recebem maior peso. |
-| **Influência social** | 0.20 | Soma do grau (número de conexões no grafo social) dos usuários que interagiram com cada post. Posts curtidos por usuários influentes (altamente conectados) recebem score mais alto. |
+| **Similaridade de conteúdo** | 0.30/0.40 | Coseno entre o vetor de tags da entrada e o de cada post. Peso 0.40 no modo padrão e 0.30 no personalizado. |
+| **Co-ocorrência de tags** | 0.20/0.25 | Expande as tags de entrada com tags relacionadas (do `tag_cooccurrence.parquet`) e aplica boost nos posts que as contêm. Peso 0.25 no modo padrão e 0.20 no personalizado. |
+| **Recência relativa** | 0.15 | Decaimento exponencial `exp(-0.01 × Δdias)` pela distância em dias entre o timestamp de entrada e o do post. |
+| **Influência social** | 0.15/0.20 | Soma do grau (número de conexões no grafo social) dos usuários que interagiram com cada post. |
+| **Afinidade usuário-item** | 0.20 (personalizado) | Score médio das tags do post no perfil do usuário, que agrega interesses explícitos, interações recentes (com decaimento temporal) e sinais dos vizinhos sociais. |
 
 ### Exemplo de co-ocorrência
 

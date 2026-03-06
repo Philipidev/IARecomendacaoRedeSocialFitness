@@ -34,6 +34,7 @@ Use um dos datasets completos do [SURF/CWI](https://repository.surfsara.nl/commu
     │   ├── posts_metadata.parquet
     │   ├── interacoes_por_tag.parquet
     │   ├── social_scores.parquet
+    │   ├── user_tag_profile.parquet
     │   └── tag_lista.txt
     └── modelo/                 # Artefatos do modelo treinado (gerado)
         ├── vectorizer.pkl
@@ -94,7 +95,7 @@ python extracao_filtragem/pipeline.py
 python treinamento/preparacao_dados.py
 ```
 
-Lê os parquets de `extracao_filtragem/output/` e gera artefatos intermediários em `treinamento/dados/`, incluindo `social_scores.parquet`.
+Lê os parquets de `extracao_filtragem/output/` e gera artefatos intermediários em `treinamento/dados/`, incluindo `social_scores.parquet` e `user_tag_profile.parquet`.
 
 ### 2. Dividir o dataset
 
@@ -121,8 +122,11 @@ python treinamento/recomendar.py --listar-tags
 # Recomendar posts por tags e timestamp
 python treinamento/recomendar.py --tags "Born_to_Run,Superunknown" --timestamp 1320000000000
 
-# Top 5 posts mais próximos no tempo e por tags
-python treinamento/recomendar.py --tags "Running_Free" --timestamp 1300000000000 --top-k 5
+# Recomendar de forma personalizada para um usuário
+python treinamento/recomendar.py --tags "Born_to_Run,Superunknown" --timestamp 1320000000000 --user-id 123
+
+# Top 5 posts mais próximos no tempo e por tags (personalizado)
+python treinamento/recomendar.py --tags "Running_Free" --timestamp 1300000000000 --top-k 5 --user-id 123
 ```
 
 ### 5. Recomendar via Python
@@ -134,24 +138,27 @@ df = recomendar(
     tags=["Born_to_Run", "Superunknown"],
     timestamp=1320000000000,
     top_k=10,
+    user_id=123,
 )
 print(df)
 ```
 
 ### Arquitetura do modelo
 
-O score de relevância combina quatro sinais:
+O score de relevância combina cinco sinais (quando `user_id` é informado):
 
 | Sinal | Peso | Descrição |
 |---|---|---|
-| Similaridade de conteúdo | 0.40 | Coseno entre vetores de tags (MultiLabelBinarizer) |
-| Co-ocorrência de tags | 0.25 | Boost para tags relacionadas que também aparecem no post |
+| Similaridade de conteúdo | 0.30 | Coseno entre vetores de tags (MultiLabelBinarizer) |
+| Co-ocorrência de tags | 0.20 | Boost para tags relacionadas que também aparecem no post |
 | Recência relativa | 0.15 | Decaimento exponencial pela distância em dias ao timestamp de entrada |
-| Influência social | 0.20 | Soma do grau dos usuários que interagiram com o post no grafo social |
+| Influência social | 0.15 | Soma do grau dos usuários que interagiram com o post no grafo social |
+| Afinidade usuário-item | 0.20 | Perfil do usuário com interesses explícitos, interações recentes e sinais sociais dos vizinhos |
 
 **Entradas:**
 - `tags: List[str]` — nomes das tags (valores, não IDs)
 - `timestamp: int` — timestamp em milissegundos
+- `user_id: Optional[int]` — ativa recomendação personalizada (fallback ao modelo anterior quando ausente)
 
 **Saídas** (sem IDs):
 

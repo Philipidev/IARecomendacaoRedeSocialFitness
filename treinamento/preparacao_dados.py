@@ -5,6 +5,7 @@ Lê os parquets gerados pelo pipeline de extração e produz:
   - posts_metadata.parquet     : posts com apenas valores (sem IDs na interface de saída)
   - interacoes_por_tag.parquet : contagem de interações por tag (para peso de popularidade)
   - social_scores.parquet      : score de influência social por post (grau dos usuários que interagiram)
+  - user_tag_profile.parquet   : afinidade usuário-tag (interesses + histórico + vizinhos)
   - tag_lista.txt              : lista canônica de todas as tags fitness conhecidas
 
 Uso:
@@ -25,6 +26,14 @@ ROOT = Path(__file__).resolve().parent.parent
 OUTPUT_DIR = ROOT / "extracao_filtragem" / "output"
 TREINAMENTO_DIR = ROOT / "treinamento"
 DADOS_DIR = TREINAMENTO_DIR / "dados"
+
+EVENTO_PESO = {
+    "like": 1.0,
+    "reply": 1.2,
+    "create": 1.5,
+}
+LAMBDA_RECENCIA_USUARIO = 0.03
+MS_POR_DIA = 86_400_000
 
 
 def _parse_tags(value) -> list[str]:
@@ -161,6 +170,114 @@ def calcular_scores_sociais(
     return pd.DataFrame({"social_score": scores})
 
 
+def construir_perfis_usuario(
+    interactions: pd.DataFrame,
+    interests: pd.DataFrame,
+    social_graph: pd.DataFrame | None = None,
+) -> pd.DataFrame:
+    """
+    Constrói score de afinidade por (user_id, tag_name) combinando:
+      1) interesses explícitos,
+      2) histórico de interações com recência,
+      3) sinais sociais dos vizinhos (grafo de amizades).
+    """
+
+    # ------------------------------
+    # Interesses explícitos
+    # ------------------------------
+    if interests is not None and not interests.empty:
+        explicit_df = (
+            interests.groupby(["user_id", "tag_name"]).size().reset_index(name="explicit_score")
+        )
+        explicit_df["explicit_score"] = explicit_df["explicit_score"].astype(np.float32)
+    else:
+        explicit_df = pd.DataFrame(columns=["user_id", "tag_name", "explicit_score"])
+
+    # ------------------------------
+    # Interações (com recência + tipo de evento)
+    # ------------------------------
+    inter = interactions.copy()
+    inter["timestamp"] = pd.to_numeric(inter["timestamp"], errors="coerce")
+    ts_max = inter["timestamp"].max()
+
+    linhas_inter = []
+    for _, row in inter.iterrows():
+        tags = _parse_tags(row.get("tags_fitness"))
+        if not tags:
+            continue
+
+        idade_dias = 0.0
+        if pd.notna(ts_max) and pd.notna(row["timestamp"]):
+            idade_dias = max(0.0, float(ts_max - row["timestamp"]) / MS_POR_DIA)
+
+        peso_evento = EVENTO_PESO.get(str(row.get("event_type", "")).lower(), 1.0)
+        peso_recencia = float(np.exp(-LAMBDA_RECENCIA_USUARIO * idade_dias))
+        peso = peso_evento * peso_recencia
+
+        for tag in tags:
+            linhas_inter.append(
+                {
+                    "user_id": int(row["user_id"]),
+                    "tag_name": str(tag),
+                    "interaction_score": peso,
+                }
+            )
+
+    if linhas_inter:
+        interaction_df = pd.DataFrame(linhas_inter)
+        interaction_df = (
+            interaction_df.groupby(["user_id", "tag_name"], as_index=False)["interaction_score"]
+            .sum()
+            .astype({"interaction_score": np.float32})
+        )
+    else:
+        interaction_df = pd.DataFrame(columns=["user_id", "tag_name", "interaction_score"])
+
+    # ------------------------------
+    # Sinal social dos vizinhos
+    # ------------------------------
+    neighbor_df = pd.DataFrame(columns=["user_id", "tag_name", "neighbor_score"])
+    if social_graph is not None and not social_graph.empty and not interaction_df.empty:
+        edges = social_graph[["user_id", "friend_id"]].dropna().copy()
+        edges = edges.astype({"user_id": "int64", "friend_id": "int64"})
+
+        # Grafo não-direcionado: adiciona arestas invertidas
+        edges_rev = edges.rename(columns={"user_id": "friend_id", "friend_id": "user_id"})
+        edges_undir = pd.concat([edges, edges_rev], ignore_index=True).drop_duplicates()
+        edges_undir = edges_undir.rename(columns={"friend_id": "neighbor_id"})
+
+        source_scores = interaction_df.rename(
+            columns={"user_id": "neighbor_id", "interaction_score": "neighbor_score"}
+        )
+
+        neighbor_df = edges_undir.merge(source_scores, on="neighbor_id", how="inner")
+        neighbor_df = (
+            neighbor_df.groupby(["user_id", "tag_name"], as_index=False)["neighbor_score"]
+            .sum()
+            .astype({"neighbor_score": np.float32})
+        )
+
+    # ------------------------------
+    # Combina e normaliza por usuário
+    # ------------------------------
+    perfil = explicit_df.merge(interaction_df, on=["user_id", "tag_name"], how="outer")
+    perfil = perfil.merge(neighbor_df, on=["user_id", "tag_name"], how="outer")
+    perfil = perfil.fillna(0.0)
+
+    for col in ["explicit_score", "interaction_score", "neighbor_score"]:
+        max_by_user = perfil.groupby("user_id")[col].transform("max")
+        max_by_user = max_by_user.replace(0.0, 1.0)
+        perfil[col] = (perfil[col] / max_by_user).astype(np.float32)
+
+    perfil["user_tag_affinity"] = (
+        0.4 * perfil["interaction_score"]
+        + 0.4 * perfil["explicit_score"]
+        + 0.2 * perfil["neighbor_score"]
+    ).astype(np.float32)
+
+    return perfil.sort_values(["user_id", "user_tag_affinity"], ascending=[True, False]).reset_index(drop=True)
+
+
 def salvar_metricas_txt(dados: dict[str, pd.DataFrame], dados_dir: Path) -> None:
     """Exporta um .txt por métrica relevante — uma linha por valor único."""
 
@@ -245,6 +362,24 @@ def main() -> None:
     if "tags_fitness" in dados:
         print("\nSalvando lista canônica de tags...")
         salvar_tag_lista(dados["tags_fitness"], DADOS_DIR)
+
+    if "interactions_fitness" in dados and "user_interests_fitness" in dados:
+        print("\nConstruindo perfis de afinidade por usuário...")
+        user_tag_profile = construir_perfis_usuario(
+            dados["interactions_fitness"],
+            dados["user_interests_fitness"],
+            dados.get("user_social_graph"),
+        )
+        caminho_user_profile = DADOS_DIR / "user_tag_profile.parquet"
+        user_tag_profile.to_parquet(caminho_user_profile, index=False)
+        print(
+            f"  user_tag_profile.parquet: {len(user_tag_profile)} pares usuário-tag salvos em {caminho_user_profile}"
+        )
+    else:
+        print(
+            "\n[AVISO] interactions_fitness ou user_interests_fitness ausentes — "
+            "user_tag_profile.parquet não gerado."
+        )
 
     print("\nSalvando métricas como arquivos .txt...")
     salvar_metricas_txt(dados, DADOS_DIR)
