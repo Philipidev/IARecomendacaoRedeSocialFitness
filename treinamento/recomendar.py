@@ -42,6 +42,8 @@ from __future__ import annotations
 
 import argparse
 import ast
+import json
+import math
 import pickle
 from pathlib import Path
 
@@ -52,22 +54,55 @@ from sklearn.metrics.pairwise import cosine_similarity
 ROOT = Path(__file__).resolve().parent.parent
 DADOS_DIR = ROOT / "treinamento" / "dados"
 MODELO_DIR = ROOT / "treinamento" / "modelo"
+PESOS_OTIMOS_PATH = MODELO_DIR / "pesos_otimos.json"
 
-# Pesos do score padrão
-PESO_COSINE = 0.35
-PESO_COOC = 0.25
-PESO_TIME = 0.15
-PESO_SOCIAL = 0.15
+# Pesos padrão/fallback do score base (quatro sinais)
+PESO_COSINE_PADRAO = 0.40
+PESO_COOC_PADRAO = 0.25
+PESO_TIME_PADRAO = 0.15
+PESO_SOCIAL_PADRAO = 0.20
 PESO_POPULARIDADE = 0.10
 
 # Pesos do score personalizado
 PESO_COSINE_PERSONALIZADO = 0.30
 PESO_COOC_PERSONALIZADO = 0.20
+PESO_TIME_PERSONALIZADO = 0.15
+PESO_SOCIAL_PERSONALIZADO = 0.15
 PESO_USER_AFFINITY = 0.20
 
 # Lambda do decaimento temporal (por dia)
 LAMBDA_DECAY = 0.01
 MS_POR_DIA = 86_400_000
+
+
+def _carregar_pesos_otimos() -> tuple[float, float, float, float]:
+    """Carrega pesos otimizados quando disponíveis; caso contrário usa padrão."""
+    default = (PESO_COSINE_PADRAO, PESO_COOC_PADRAO, PESO_TIME_PADRAO, PESO_SOCIAL_PADRAO)
+
+    if not PESOS_OTIMOS_PATH.exists():
+        return default
+
+    try:
+        with open(PESOS_OTIMOS_PATH, "r", encoding="utf-8") as f:
+            payload = json.load(f)
+
+        pesos = (
+            float(payload["w_cos"]),
+            float(payload["w_cooc"]),
+            float(payload["w_time"]),
+            float(payload["w_social"]),
+        )
+
+        if any(w < 0 for w in pesos):
+            return default
+        if not math.isclose(sum(pesos), 1.0, rel_tol=0, abs_tol=1e-6):
+            return default
+        return pesos
+    except Exception:
+        return default
+
+
+PESO_COSINE_BASE, PESO_COOC_BASE, PESO_TIME_BASE, PESO_SOCIAL_BASE = _carregar_pesos_otimos()
 
 
 def _parse_tags(value) -> list[str]:
@@ -244,18 +279,24 @@ class ModeloRecomendacao:
             score_final = (
                 PESO_COSINE_PERSONALIZADO * sc
                 + PESO_COOC_PERSONALIZADO * si
-                + PESO_TIME * st
-                + PESO_SOCIAL * ss
+                + PESO_TIME_PERSONALIZADO * st
+                + PESO_SOCIAL_PERSONALIZADO * ss
                 + PESO_USER_AFFINITY * su
             )
         else:
             sp = self._score_popularidade()
-            peso_total = PESO_COSINE + PESO_COOC + PESO_TIME + PESO_SOCIAL + peso_popularidade
+            peso_total = (
+                PESO_COSINE_BASE
+                + PESO_COOC_BASE
+                + PESO_TIME_BASE
+                + PESO_SOCIAL_BASE
+                + peso_popularidade
+            )
             score_final = (
-                PESO_COSINE * sc
-                + PESO_COOC * si
-                + PESO_TIME * st
-                + PESO_SOCIAL * ss
+                PESO_COSINE_BASE * sc
+                + PESO_COOC_BASE * si
+                + PESO_TIME_BASE * st
+                + PESO_SOCIAL_BASE * ss
                 + peso_popularidade * sp
             ) / peso_total
 
