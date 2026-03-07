@@ -1,0 +1,109 @@
+{
+  "casos": [
+    {
+      "id": "caso_01_corrida_recente",
+      "titulo": "Corrida com prioridade de recência",
+      "descricao": "Usuário iniciante em corrida buscando conteúdo recente e diretamente relacionado a running.",
+      "entrada": {
+        "tags": ["Born_to_Run", "Running_Free"],
+        "timestamp": 1320000000000,
+        "top_k": 5,
+        "contexto_usuario": {
+          "perfil": "iniciante",
+          "objetivo": "melhorar condicionamento para 5km",
+          "restricoes": ["evitar conteúdos fora do tema corrida"]
+        }
+      },
+      "criterios_saida": {
+        "aderencia_tematica": {
+          "esperado": "A maioria dos itens deve conter ao menos uma tag da entrada ou tag correlata de corrida.",
+          "proporcao_minima": 0.8
+        },
+        "recencia": {
+          "esperado": "Resultados devem concentrar posts temporalmente próximos ao timestamp informado.",
+          "max_delta_dias": 365,
+          "proporcao_minima": 0.6
+        },
+        "variedade": {
+          "esperado": "Top-K não deve repetir exatamente o mesmo conjunto de tags em todos os itens.",
+          "minimo_conjuntos_unicos": 3
+        },
+        "ausencia_itens_irrelevantes": {
+          "esperado": "Não devem aparecer itens com tags explicitamente irrelevantes ao objetivo do usuário.",
+          "tags_bloqueadas": ["Cooking", "Politics", "Fashion"],
+          "proporcao_minima": 1.0
+        }
+      }
+    },
+    {
+      "id": "caso_02_crossfit_social",
+      "titulo": "Crossfit com influência social",
+      "descricao": "Usuário intermediário procura conteúdos de treino funcional, aceitando variação de intensidade.",
+      "entrada": {
+        "tags": ["Superunknown", "Run_with_the_Pack"],
+        "timestamp": 1305000000000,
+        "top_k": 7,
+        "contexto_usuario": {
+          "perfil": "intermediario",
+          "objetivo": "treino funcional e alta intensidade",
+          "restricoes": ["priorizar posts com engajamento social"]
+        }
+      },
+      "criterios_saida": {
+        "aderencia_tematica": {
+          "esperado": "Recomendações devem manter foco em treino funcional/corrida e evitar desvio temático.",
+          "proporcao_minima": 0.7
+        },
+        "recencia": {
+          "esperado": "Metade ou mais dos itens deve ficar dentro da janela temporal esperada.",
+          "max_delta_dias": 730,
+          "proporcao_minima": 0.5
+        },
+        "variedade": {
+          "esperado": "Deve haver diversidade de combinações de tags para evitar bolha de recomendação.",
+          "minimo_conjuntos_unicos": 4
+        },
+        "ausencia_itens_irrelevantes": {
+          "esperado": "Itens irrelevantes devem ser residuais ou inexistentes.",
+          "tags_bloqueadas": ["Celebrity", "Cars"],
+          "proporcao_minima": 0.9
+        }
+      }
+    },
+    {
+      "id": "caso_03_ambiguidade_tag",
+      "titulo": "Entrada com tag única para avaliar diversidade",
+      "descricao": "Usuário avançado fornece apenas uma tag para observar expansão por co-ocorrência sem perder precisão.",
+      "entrada": {
+        "tags": ["Young_Hearts_Run_Free"],
+        "timestamp": 1290000000000,
+        "top_k": 10,
+        "contexto_usuario": {
+          "perfil": "avancado",
+          "objetivo": "descoberta de conteúdos relacionados sem perder qualidade",
+          "restricoes": ["evitar excesso de resultados duplicados"]
+        }
+      },
+      "criterios_saida": {
+        "aderencia_tematica": {
+          "esperado": "Mesmo com entrada curta, os itens devem permanecer no domínio fitness/corrida.",
+          "proporcao_minima": 0.7
+        },
+        "recencia": {
+          "esperado": "Resultados recentes em relação ao timestamp devem ser favorecidos, sem zerar variedade.",
+          "max_delta_dias": 1095,
+          "proporcao_minima": 0.5
+        },
+        "variedade": {
+          "esperado": "Co-ocorrência deve trazer pluralidade de tags no top-K.",
+          "minimo_conjuntos_unicos": 5
+        },
+        "ausencia_itens_irrelevantes": {
+          "esperado": "Itens com tags bloqueadas não devem dominar o ranking.",
+          "tags_bloqueadas": ["Finance", "Religion"],
+          "proporcao_minima": 0.9
+        }
+      }
+    }
+  ]
+}
