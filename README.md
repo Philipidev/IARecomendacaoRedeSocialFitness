@@ -34,6 +34,7 @@ Use um dos datasets completos do [SURF/CWI](https://repository.surfsara.nl/commu
     │   ├── posts_metadata.parquet
     │   ├── interacoes_por_tag.parquet
     │   ├── social_scores.parquet
+    │   ├── user_tag_profile.parquet
     │   └── tag_lista.txt
     └── modelo/                 # Artefatos do modelo treinado (gerado)
         ├── vectorizer.pkl
@@ -94,7 +95,7 @@ python extracao_filtragem/pipeline.py
 python treinamento/preparacao_dados.py
 ```
 
-Lê os parquets de `extracao_filtragem/output/` e gera artefatos intermediários em `treinamento/dados/`, incluindo `social_scores.parquet`.
+Lê os parquets de `extracao_filtragem/output/` e gera artefatos intermediários em `treinamento/dados/`, incluindo `social_scores.parquet` e `user_tag_profile.parquet`.
 
 ### 2. Dividir o dataset
 
@@ -121,10 +122,13 @@ python treinamento/recomendar.py --listar-tags
 # Recomendar posts por tags e timestamp
 python treinamento/recomendar.py --tags "Born_to_Run,Superunknown" --timestamp 1320000000000
 
-# Top 5 posts mais próximos no tempo e por tags
-python treinamento/recomendar.py --tags "Running_Free" --timestamp 1300000000000 --top-k 5
+# Recomendar de forma personalizada para um usuário
+python treinamento/recomendar.py --tags "Born_to_Run,Superunknown" --timestamp 1320000000000 --user-id 123
 
-# Ajustar o peso da popularidade no score final
+# Top 5 posts mais próximos no tempo e por tags (personalizado)
+python treinamento/recomendar.py --tags "Running_Free" --timestamp 1300000000000 --top-k 5 --user-id 123
+
+# Ajustar o peso da popularidade no score padrão/fallback
 python treinamento/recomendar.py --tags "Running_Free" --timestamp 1300000000000 --peso-popularidade 0.20
 ```
 
@@ -138,6 +142,7 @@ df = recomendar(
     tags=["Born_to_Run", "Superunknown"],
     timestamp=1320000000000,
     top_k=10,
+    user_id=123,
 )
 print(df)
 ```
@@ -154,19 +159,24 @@ python avaliacao/avaliar_popularidade.py --demo --k 10 --peso-depois 0.10
 
 ### Arquitetura do modelo
 
-O score de relevância combina cinco sinais:
+O score de relevância combina cinco sinais no modo padrão e cinco no modo
+personalizado (`user_id` informado com perfil disponível). No modo personalizado,
+a afinidade usuário-item substitui o sinal de popularidade.
 
-| Sinal | Peso | Descrição |
-|---|---|---|
-| Similaridade de conteúdo | 0.35 | Coseno entre vetores de tags (MultiLabelBinarizer) |
-| Co-ocorrência de tags | 0.25 | Boost para tags relacionadas que também aparecem no post |
-| Recência relativa | 0.15 | Decaimento exponencial pela distância em dias ao timestamp de entrada |
-| Influência social | 0.15 | Soma do grau dos usuários que interagiram com o post no grafo social |
-| Popularidade de tags | 0.10 (configurável) | Volume histórico de interações das tags do post (`popularidade.npy`) |
+| Sinal | Peso (padrão) | Peso (personalizado) | Descrição |
+|---|---|---|---|
+| Similaridade de conteúdo | 0.35 | 0.30 | Coseno entre vetores de tags (MultiLabelBinarizer) |
+| Co-ocorrência de tags | 0.25 | 0.20 | Boost para tags relacionadas que também aparecem no post |
+| Recência relativa | 0.15 | 0.15 | Decaimento exponencial pela distância em dias ao timestamp de entrada |
+| Influência social | 0.15 | 0.15 | Soma do grau dos usuários que interagiram com o post no grafo social |
+| Popularidade de tags | 0.10 (configurável) | - | Volume histórico de interações das tags do post (`popularidade.npy`) |
+| Afinidade usuário-item | - | 0.20 | Perfil do usuário com interesses explícitos, interações recentes e sinais sociais dos vizinhos |
 
 **Entradas:**
 - `tags: List[str]` — nomes das tags (valores, não IDs)
 - `timestamp: int` — timestamp em milissegundos
+- `peso_popularidade: float` — ajusta o sinal de popularidade no score padrão/fallback
+- `user_id: Optional[int]` — ativa recomendação personalizada quando houver perfil do usuário; caso contrário, usa o score padrão
 
 **Saídas** (sem IDs):
 
@@ -177,7 +187,7 @@ O score de relevância combina cinco sinais:
 | `tags_fitness` | Lista de tags fitness do post recomendado |
 | `content_length` | Tamanho do conteúdo em caracteres |
 | `language` | Idioma detectado |
-| `relevance_score` | Score combinado [0, 1] |
+| `relevance_score` | Score combinado normalizado [0, 1] |
 
 ---
 

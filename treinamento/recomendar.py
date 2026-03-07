@@ -3,19 +3,30 @@ Módulo de recomendação de posts fitness.
 
 Carrega os artefatos treinados e expõe a função principal:
 
-    recomendar(tags, timestamp, top_k=10) -> pd.DataFrame
+    recomendar(
+        tags,
+        timestamp,
+        top_k=10,
+        excluir_tags_exatas=True,
+        peso_popularidade=0.10,
+        user_id=None,
+    ) -> pd.DataFrame
 
-O score de relevância combina cinco sinais:
-  - Similaridade de conteúdo  (0.35): coseno entre o vetor de tags de entrada e cada post
-  - Co-ocorrência de tags     (0.25): boost para posts que contêm tags relacionadas às de entrada
-  - Recência relativa         (0.15): decaimento exponencial pela distância temporal em dias
-  - Influência social         (0.15): soma dos graus dos usuários que interagiram com o post
-  - Popularidade              (0.10): volume histórico de interações nas tags do post
+O score de relevância combina cinco sinais no modo padrão e cinco no modo
+personalizado (`user_id` informado com perfil disponível):
+  - Similaridade de conteúdo: coseno entre o vetor de tags de entrada e cada post
+  - Co-ocorrência de tags: boost para posts que contêm tags relacionadas às de entrada
+  - Recência relativa: decaimento exponencial pela distância temporal em dias
+  - Influência social: soma dos graus dos usuários que interagiram com o post
+  - Quinto sinal:
+      * Popularidade (modo padrão): volume histórico de interações nas tags do post
+      * Afinidade usuário-item (modo personalizado): interesses explícitos, interações recentes e vizinhos
 
 Entradas:
     tags      : List[str]  — nomes das tags (valores, não IDs)
     timestamp : int        — timestamp em milissegundos do post de referência
     top_k     : int        — número de recomendações
+    user_id   : int|None   — usuário alvo para personalização (opcional)
 
 Saída:
     DataFrame com colunas:
@@ -24,16 +35,14 @@ Saída:
 
 Uso como script (CLI):
     python treinamento/recomendar.py --tags "Born_to_Run,Superunknown" --timestamp 1320000000000
-    python treinamento/recomendar.py --tags "Running_Free" --timestamp 1300000000000 --top-k 5
+    python treinamento/recomendar.py --tags "Running_Free" --timestamp 1300000000000 --top-k 5 --user-id 123
 """
 
 from __future__ import annotations
 
 import argparse
 import ast
-import math
 import pickle
-import sys
 from pathlib import Path
 
 import numpy as np
@@ -44,12 +53,17 @@ ROOT = Path(__file__).resolve().parent.parent
 DADOS_DIR = ROOT / "treinamento" / "dados"
 MODELO_DIR = ROOT / "treinamento" / "modelo"
 
-# Pesos do score híbrido
+# Pesos do score padrão
 PESO_COSINE = 0.35
 PESO_COOC = 0.25
 PESO_TIME = 0.15
 PESO_SOCIAL = 0.15
 PESO_POPULARIDADE = 0.10
+
+# Pesos do score personalizado
+PESO_COSINE_PERSONALIZADO = 0.30
+PESO_COOC_PERSONALIZADO = 0.20
+PESO_USER_AFFINITY = 0.20
 
 # Lambda do decaimento temporal (por dia)
 LAMBDA_DECAY = 0.01
@@ -58,6 +72,7 @@ MS_POR_DIA = 86_400_000
 
 def _parse_tags(value) -> list[str]:
     import numpy as np
+
     if isinstance(value, (list, np.ndarray)):
         return [str(t) for t in value]
     if isinstance(value, str):
@@ -79,6 +94,7 @@ class ModeloRecomendacao:
         self._popularidade: np.ndarray | None = None
         self._social_scores: np.ndarray | None = None
         self._posts: pd.DataFrame | None = None
+        self._user_tag_profile: pd.DataFrame | None = None
 
     def carregar(self) -> "ModeloRecomendacao":
         """Carrega todos os artefatos do modelo e os posts de referência."""
@@ -100,15 +116,12 @@ class ModeloRecomendacao:
         with open(MODELO_DIR / "tag_cooccurrence_map.pkl", "rb") as f:
             self._cooccurrence_map = pickle.load(f)
 
-        # Social scores são opcionais — fallback para zeros se artefato ausente
         social_path = MODELO_DIR / "social_scores.npy"
-        if social_path.exists():
-            self._social_scores = np.load(social_path)
-        else:
-            self._social_scores = None
+        self._social_scores = np.load(social_path) if social_path.exists() else None
 
-        # posts_cache.parquet garante alinhamento exato com post_matrix
-        # (treino em split usa subconjunto de posts; posts_metadata tem todos)
+        profile_path = DADOS_DIR / "user_tag_profile.parquet"
+        self._user_tag_profile = pd.read_parquet(profile_path) if profile_path.exists() else None
+
         cache_path = MODELO_DIR / "posts_cache.parquet"
         fallback_path = DADOS_DIR / "posts_metadata.parquet"
 
@@ -128,30 +141,18 @@ class ModeloRecomendacao:
         self._posts["tags_fitness"] = self._posts["tags_fitness"].apply(_parse_tags)
         return self
 
-    # ------------------------------------------------------------------
-    # Sinais individuais
-    # ------------------------------------------------------------------
-
     def _score_cosine(self, tags_entrada: list[str]) -> np.ndarray:
-        """Similaridade coseno entre a entrada e cada post."""
         vetor_entrada = self._vectorizer.transform([tags_entrada]).astype(np.float32)
         if vetor_entrada.sum() == 0:
             return np.zeros(len(self._posts), dtype=np.float32)
-        sims = cosine_similarity(vetor_entrada, self._post_matrix).flatten()
-        return sims.astype(np.float32)
+        return cosine_similarity(vetor_entrada, self._post_matrix).flatten().astype(np.float32)
 
     def _score_cooccurrence(self, tags_entrada: list[str]) -> np.ndarray:
-        """
-        Boost baseado em tags co-ocorrentes.
-        Para cada tag de entrada, obtém suas tags relacionadas com pesos.
-        Soma os pesos das tags relacionadas presentes em cada post.
-        """
         tags_conhecidas = set(self._vectorizer.classes_)
         boost_por_tag: dict[str, float] = {}
 
         for tag in tags_entrada:
-            vizinhos = self._cooccurrence_map.get(tag, [])
-            for tag_viz, peso in vizinhos:
+            for tag_viz, peso in self._cooccurrence_map.get(tag, []):
                 if tag_viz in tags_conhecidas:
                     boost_por_tag[tag_viz] = boost_por_tag.get(tag_viz, 0.0) + peso
 
@@ -163,18 +164,12 @@ class ModeloRecomendacao:
             for tag_post in tags_post:
                 scores[i] += boost_por_tag.get(tag_post, 0.0)
 
-        # Normaliza para [0, 1]
         max_score = scores.max()
         if max_score > 0:
             scores /= max_score
-
         return scores
 
     def _score_social(self) -> np.ndarray:
-        """
-        Retorna o vetor de influência social pré-computado (já normalizado em [0,1]).
-        Se o artefato não foi carregado, retorna zeros.
-        """
         if self._social_scores is not None and len(self._social_scores) == len(self._posts):
             return self._social_scores
         return np.zeros(len(self._posts), dtype=np.float32)
@@ -189,15 +184,36 @@ class ModeloRecomendacao:
         return np.zeros(len(self._posts), dtype=np.float32)
 
     def _score_time_decay(self, timestamp_entrada: int) -> np.ndarray:
-        """Decaimento exponencial pela distância temporal em dias."""
         timestamps_posts = self._posts["creation_date"].values.astype(np.float64)
         delta_dias = np.abs(timestamps_posts - float(timestamp_entrada)) / MS_POR_DIA
-        decaimento = np.exp(-LAMBDA_DECAY * delta_dias).astype(np.float32)
-        return decaimento
+        return np.exp(-LAMBDA_DECAY * delta_dias).astype(np.float32)
 
-    # ------------------------------------------------------------------
-    # Recomendação principal
-    # ------------------------------------------------------------------
+    def _score_user_affinity(self, user_id: int | None) -> np.ndarray:
+        if user_id is None or self._user_tag_profile is None or self._user_tag_profile.empty:
+            return np.zeros(len(self._posts), dtype=np.float32)
+
+        perfil_user = self._user_tag_profile[self._user_tag_profile["user_id"] == int(user_id)]
+        if perfil_user.empty:
+            return np.zeros(len(self._posts), dtype=np.float32)
+
+        tag_score = dict(zip(perfil_user["tag_name"], perfil_user["user_tag_affinity"]))
+        scores = np.zeros(len(self._posts), dtype=np.float32)
+
+        for i, tags_post in enumerate(self._posts["tags_fitness"]):
+            if not tags_post:
+                continue
+            total = sum(float(tag_score.get(tag, 0.0)) for tag in tags_post)
+            scores[i] = total / len(tags_post)
+
+        max_score = scores.max()
+        if max_score > 0:
+            scores /= max_score
+        return scores
+
+    def _tem_perfil_usuario(self, user_id: int | None) -> bool:
+        if user_id is None or self._user_tag_profile is None or self._user_tag_profile.empty:
+            return False
+        return bool((self._user_tag_profile["user_id"] == int(user_id)).any())
 
     def recomendar(
         self,
@@ -206,56 +222,51 @@ class ModeloRecomendacao:
         top_k: int = 10,
         excluir_tags_exatas: bool = True,
         peso_popularidade: float = PESO_POPULARIDADE,
+        user_id: int | None = None,
     ) -> pd.DataFrame:
-        """
-        Retorna os top_k posts mais relevantes dado um conjunto de tags e timestamp.
-
-        Parâmetros
-        ----------
-        tags : list[str]
-            Nomes das tags do post de referência.
-        timestamp : int
-            Timestamp em milissegundos do post de referência.
-        top_k : int
-            Número de recomendações a retornar.
-        excluir_tags_exatas : bool
-            Se True, remove posts que possuem exatamente o mesmo conjunto de tags
-            que a entrada (evita recomendar o próprio post).
-
-        Retorna
-        -------
-        DataFrame com colunas:
-            message_type, creation_date_iso, tags_fitness,
-            content_length, language, relevance_score
-        """
         if self._posts is None:
             raise RuntimeError("Modelo não carregado. Chame .carregar() primeiro.")
 
         tags_norm = [t.strip() for t in tags if t.strip()]
         if not tags_norm:
             raise ValueError("Lista de tags não pode ser vazia.")
+        if peso_popularidade < 0:
+            raise ValueError("peso_popularidade deve ser maior ou igual a zero.")
 
         sc = self._score_cosine(tags_norm)
         si = self._score_cooccurrence(tags_norm)
         st = self._score_time_decay(timestamp)
         ss = self._score_social()
-        sp = self._score_popularidade()
+        usar_personalizacao = self._tem_perfil_usuario(user_id)
 
-        score_final = (
-            PESO_COSINE * sc
-            + PESO_COOC * si
-            + PESO_TIME * st
-            + PESO_SOCIAL * ss
-            + peso_popularidade * sp
-        )
+        if usar_personalizacao:
+            su = self._score_user_affinity(user_id)
+            score_final = (
+                PESO_COSINE_PERSONALIZADO * sc
+                + PESO_COOC_PERSONALIZADO * si
+                + PESO_TIME * st
+                + PESO_SOCIAL * ss
+                + PESO_USER_AFFINITY * su
+            )
+        else:
+            sp = self._score_popularidade()
+            peso_total = PESO_COSINE + PESO_COOC + PESO_TIME + PESO_SOCIAL + peso_popularidade
+            score_final = (
+                PESO_COSINE * sc
+                + PESO_COOC * si
+                + PESO_TIME * st
+                + PESO_SOCIAL * ss
+                + peso_popularidade * sp
+            ) / peso_total
+
+        score_final = np.clip(score_final, 0.0, 1.0).astype(np.float32)
 
         resultado = self._posts.copy()
         resultado["relevance_score"] = score_final.round(4)
 
         if excluir_tags_exatas:
             tags_set = set(tags_norm)
-            mascara = resultado["tags_fitness"].apply(lambda t: set(t) != tags_set)
-            resultado = resultado[mascara]
+            resultado = resultado[resultado["tags_fitness"].apply(lambda t: set(t) != tags_set)]
 
         resultado = resultado.sort_values("relevance_score", ascending=False).head(top_k)
 
@@ -267,13 +278,8 @@ class ModeloRecomendacao:
             "language",
             "relevance_score",
         ]
-        colunas_disponiveis = [c for c in colunas_saida if c in resultado.columns]
-        return resultado[colunas_disponiveis].reset_index(drop=True)
+        return resultado[[c for c in colunas_saida if c in resultado.columns]].reset_index(drop=True)
 
-
-# ------------------------------------------------------------------
-# Instância global (lazy-loaded)
-# ------------------------------------------------------------------
 
 _modelo: ModeloRecomendacao | None = None
 
@@ -291,6 +297,7 @@ def recomendar(
     top_k: int = 10,
     excluir_tags_exatas: bool = True,
     peso_popularidade: float = PESO_POPULARIDADE,
+    user_id: int | None = None,
 ) -> pd.DataFrame:
     """
     Função de alto nível para recomendação de posts fitness.
@@ -306,24 +313,23 @@ def recomendar(
     excluir_tags_exatas : bool
         Remove posts com conjunto de tags idêntico ao da entrada.
     peso_popularidade : float
-        Peso do sinal de popularidade no score final (padrão: 0.10).
+        Peso do sinal de popularidade no score padrão/fallback (padrão: 0.10).
+    user_id : int | None
+        Identificador do usuário alvo; se houver perfil disponível, ativa personalização.
 
     Retorna
     -------
     pd.DataFrame com os top_k posts recomendados e seus scores de relevância.
-
-    Exemplo
-    -------
-    >>> from treinamento.recomendar import recomendar
-    >>> df = recomendar(["Born_to_Run"], timestamp=1320000000000, top_k=5)
-    >>> print(df)
     """
-    return _get_modelo().recomendar(tags, timestamp, top_k, excluir_tags_exatas, peso_popularidade)
+    return _get_modelo().recomendar(
+        tags,
+        timestamp,
+        top_k,
+        excluir_tags_exatas,
+        peso_popularidade,
+        user_id,
+    )
 
-
-# ------------------------------------------------------------------
-# CLI
-# ------------------------------------------------------------------
 
 def _cli() -> None:
     parser = argparse.ArgumentParser(
@@ -332,37 +338,21 @@ def _cli() -> None:
         epilog="""
 Exemplos:
   python treinamento/recomendar.py --tags "Born_to_Run,Superunknown" --timestamp 1320000000000
-  python treinamento/recomendar.py --tags "Running_Free" --timestamp 1300000000000 --top-k 5
+  python treinamento/recomendar.py --tags "Running_Free" --timestamp 1300000000000 --top-k 5 --user-id 123
   python treinamento/recomendar.py --listar-tags
         """,
     )
-    parser.add_argument(
-        "--tags",
-        type=str,
-        help='Tags separadas por vírgula (ex: "Born_to_Run,Superunknown")',
-    )
-    parser.add_argument(
-        "--timestamp",
-        type=int,
-        help="Timestamp em milissegundos do post de referência",
-    )
-    parser.add_argument(
-        "--top-k",
-        type=int,
-        default=10,
-        help="Número de recomendações (padrão: 10)",
-    )
+    parser.add_argument("--tags", type=str, help='Tags separadas por vírgula (ex: "Born_to_Run,Superunknown")')
+    parser.add_argument("--timestamp", type=int, help="Timestamp em milissegundos do post de referência")
+    parser.add_argument("--top-k", type=int, default=10, help="Número de recomendações (padrão: 10)")
     parser.add_argument(
         "--peso-popularidade",
         type=float,
         default=PESO_POPULARIDADE,
-        help=f"Peso do sinal de popularidade no score final (padrão: {PESO_POPULARIDADE})",
+        help=f"Peso do sinal de popularidade no score padrão/fallback (padrão: {PESO_POPULARIDADE})",
     )
-    parser.add_argument(
-        "--listar-tags",
-        action="store_true",
-        help="Lista todas as tags conhecidas pelo modelo",
-    )
+    parser.add_argument("--user-id", type=int, default=None, help="User ID para recomendação personalizada")
+    parser.add_argument("--listar-tags", action="store_true", help="Lista todas as tags conhecidas pelo modelo")
     parser.add_argument(
         "--incluir-exatas",
         action="store_true",
@@ -370,7 +360,6 @@ Exemplos:
     )
 
     args = parser.parse_args()
-
     modelo = _get_modelo()
 
     if args.listar_tags:
@@ -385,9 +374,10 @@ Exemplos:
 
     tags_entrada = [t.strip() for t in args.tags.split(",") if t.strip()]
 
-    print(f"\nBuscando recomendações para:")
+    print("\nBuscando recomendações para:")
     print(f"  Tags      : {tags_entrada}")
     print(f"  Timestamp : {args.timestamp}")
+    print(f"  User ID   : {args.user_id if args.user_id is not None else '(não informado)'}")
     print(f"  Top-K     : {args.top_k}")
     print(f"  Peso pop. : {args.peso_popularidade}")
     print()
@@ -398,6 +388,7 @@ Exemplos:
         top_k=args.top_k,
         excluir_tags_exatas=not args.incluir_exatas,
         peso_popularidade=args.peso_popularidade,
+        user_id=args.user_id,
     )
 
     if df.empty:

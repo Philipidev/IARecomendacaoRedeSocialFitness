@@ -14,6 +14,7 @@ treinamento/
 │   ├── posts_metadata.parquet           # Posts com apenas valores semânticos (sem IDs)
 │   ├── interacoes_por_tag.parquet       # Popularidade de cada tag por volume de interações
 │   ├── social_scores.parquet            # Score de influência social por post (dataset completo)
+│   ├── user_tag_profile.parquet         # Perfil usuário-tag (interesses + interações + vizinhos)
 │   ├── tag_lista.txt                    # Uma tag fitness por linha (alfabético)
 │   ├── event_type_lista.txt             # Tipos de evento únicos (like, create, reply)
 │   ├── language_lista.txt               # Idiomas únicos presentes nos posts
@@ -62,6 +63,7 @@ Lê os parquets de `extracao_filtragem/output/` e gera os artefatos intermediár
 - `posts_metadata.parquet` — posts com colunas semânticas (sem `message_id`), com `creation_date_iso` legível
 - `interacoes_por_tag.parquet` — contagem de interações por tag (like + create + reply)
 - `social_scores.parquet` — score de influência social por post, baseado no grau dos usuários que interagiram
+- `user_tag_profile.parquet` — afinidade usuário-tag combinando interesses explícitos, interações recentes e vizinhos no grafo social
 - `tag_lista.txt` — uma tag fitness por linha (alfabético)
 - `event_type_lista.txt` — tipos de evento únicos (like, create, reply)
 - `language_lista.txt` — idiomas únicos presentes nos posts (excluindo nulos)
@@ -118,14 +120,17 @@ python treinamento/recomendar.py --listar-tags
 # Recomendar posts a partir de tags e timestamp
 python treinamento/recomendar.py --tags "Born_to_Run,Superunknown" --timestamp 1320000000000
 
-# Limitar a 5 recomendações
-python treinamento/recomendar.py --tags "Running_Free" --timestamp 1300000000000 --top-k 5
+# Recomendar posts personalizados para um usuário
+python treinamento/recomendar.py --tags "Born_to_Run,Superunknown" --timestamp 1320000000000 --user-id 123
+
+# Limitar a 5 recomendações personalizadas
+python treinamento/recomendar.py --tags "Running_Free" --timestamp 1300000000000 --top-k 5 --user-id 123
 
 # Ajustar o peso de popularidade no score final
 python treinamento/recomendar.py --tags "Running_Free" --timestamp 1300000000000 --peso-popularidade 0.20
 
 # Incluir posts com conjunto de tags idêntico à entrada
-python treinamento/recomendar.py --tags "Running_Free" --timestamp 1300000000000 --incluir-exatas
+python treinamento/recomendar.py --tags "Running_Free" --timestamp 1300000000000 --user-id 123 --incluir-exatas
 ```
 
 **Via Python:**
@@ -137,6 +142,7 @@ df = recomendar(
     tags=["Born_to_Run", "Superunknown"],
     timestamp=1320000000000,
     top_k=10,
+    user_id=123,
 )
 print(df)
 ```
@@ -150,7 +156,8 @@ print(df)
 | `tags` | `List[str]` | Nomes das tags do post de referência (valores, não IDs) |
 | `timestamp` | `int` | Timestamp em milissegundos do post de referência |
 | `top_k` | `int` | Número de posts recomendados (padrão: 10) |
-| `peso_popularidade` | `float` | Peso do sinal de popularidade no score final (padrão: 0.10) |
+| `peso_popularidade` | `float` | Peso do sinal de popularidade no score padrão/fallback (padrão: 0.10) |
+| `user_id` | `Optional[int]` | Identificador do usuário alvo; se houver perfil disponível, ativa recomendação personalizada |
 
 ### Saída
 
@@ -167,19 +174,36 @@ DataFrame com os posts mais relevantes — **sem nenhum ID exposto**:
 
 ## Arquitetura do modelo
 
-O score de relevância é calculado combinando cinco sinais independentes:
+O score de relevância é calculado combinando cinco sinais no modo padrão e
+cinco no modo personalizado (`user_id` com perfil disponível). No modo
+personalizado, a afinidade usuário-item substitui o sinal de popularidade.
 
 ```
-score = 0.35 × cosine_sim + 0.25 × cooccurrence_boost + 0.15 × time_decay + 0.15 × social_influence + peso_popularidade × popularity_signal
+score_padrao = (
+    0.35 × cosine_sim
+    + 0.25 × cooccurrence_boost
+    + 0.15 × time_decay
+    + 0.15 × social_influence
+    + peso_popularidade × popularity_signal
+) / (0.90 + peso_popularidade)
+
+score_personalizado = (
+    0.30 × cosine_sim
+    + 0.20 × cooccurrence_boost
+    + 0.15 × time_decay
+    + 0.15 × social_influence
+    + 0.20 × user_item_affinity
+)
 ```
 
-| Sinal | Peso | Como funciona |
-|---|---|---|
-| **Similaridade de conteúdo** | 0.35 | Coseno entre o vetor de tags da entrada e o de cada post. Posts com as mesmas tags recebem score máximo. |
-| **Co-ocorrência de tags** | 0.25 | Expande as tags de entrada com tags relacionadas (do `tag_cooccurrence.parquet`) e aplica boost nos posts que as contêm. Descobre conteúdo que pessoas com gostos parecidos também curtem. |
-| **Recência relativa** | 0.15 | Decaimento exponencial `exp(-0.01 × Δdias)` pela distância em dias entre o timestamp de entrada e o do post. Posts temporalmente próximos recebem maior peso. |
-| **Influência social** | 0.15 | Soma do grau (número de conexões no grafo social) dos usuários que interagiram com cada post. Posts curtidos por usuários influentes (altamente conectados) recebem score mais alto. |
-| **Popularidade** | 0.10 (configurável) | Intensidade histórica de interações nas tags do post (`popularidade.npy`). Pode ser ajustada no CLI/API com `peso_popularidade`. |
+| Sinal | Peso (padrão) | Peso (personalizado) | Como funciona |
+|---|---|---|---|
+| **Similaridade de conteúdo** | 0.35 | 0.30 | Coseno entre o vetor de tags da entrada e o de cada post. Posts com as mesmas tags recebem score máximo. |
+| **Co-ocorrência de tags** | 0.25 | 0.20 | Expande as tags de entrada com tags relacionadas (do `tag_cooccurrence.parquet`) e aplica boost nos posts que as contêm. Descobre conteúdo relacionado mesmo sem tag exata. |
+| **Recência relativa** | 0.15 | 0.15 | Decaimento exponencial `exp(-0.01 × Δdias)` pela distância em dias entre o timestamp de entrada e o do post. |
+| **Influência social** | 0.15 | 0.15 | Soma do grau (número de conexões no grafo social) dos usuários que interagiram com cada post. |
+| **Popularidade** | 0.10 (configurável) | - | Intensidade histórica de interações nas tags do post (`popularidade.npy`). Pode ser ajustada no CLI/API com `peso_popularidade`. |
+| **Afinidade usuário-item** | - | 0.20 | Score médio das tags do post no perfil do usuário, que agrega interesses explícitos, interações recentes (com decaimento temporal) e sinais dos vizinhos sociais. |
 
 ### Exemplo de co-ocorrência
 
@@ -257,46 +281,72 @@ n_treino    = total − n_validação − n_teste  ← absorve qualquer arredond
 
 Nenhum registro é perdido: o arredondamento vai sempre para o treino.
 
-### Os cinco sinais do score de relevância
+### Os sinais do score de relevância
 
-Quando você pede uma recomendação, o modelo combina cinco sinais para calcular o `relevance_score` de cada post:
+Quando você pede uma recomendação, o modelo combina cinco sinais. No modo
+personalizado (`user_id` com perfil disponível), a afinidade usuário-item
+substitui a popularidade. Se não houver perfil para o usuário informado, o
+sistema faz fallback para o score padrão.
 
 ```
-score = 0.35 × similaridade_conteudo
-      + 0.25 × boost_coocorrencia
-      + 0.15 × fator_recencia
-      + 0.15 × influencia_social
-      + peso_popularidade × sinal_popularidade
+score_padrao = (
+    0.35 × similaridade_conteudo
+    + 0.25 × boost_coocorrencia
+    + 0.15 × fator_recencia
+    + 0.15 × influencia_social
+    + peso_popularidade × sinal_popularidade
+) / (0.90 + peso_popularidade)
+
+score_personalizado = (
+    0.30 × similaridade_conteudo
+    + 0.20 × boost_coocorrencia
+    + 0.15 × fator_recencia
+    + 0.15 × influencia_social
+    + 0.20 × afinidade_usuario_item
+)
 ```
 
-**1. Similaridade de conteúdo (peso 0.35 — o mais importante)**
+**1. Similaridade de conteúdo (0.35 no padrão / 0.30 no personalizado)**
 
-Compara matematicamente as tags do post de entrada com as tags de cada post do catálogo. Usa o algoritmo de similaridade de cosseno: posts com as mesmas tags recebem score 1.0; posts sem nenhuma tag em comum recebem 0.0.
+Compara matematicamente as tags do post de entrada com as tags de cada post do
+catálogo. Usa similaridade de cosseno: posts com as mesmas tags recebem score
+1.0; posts sem nenhuma tag em comum recebem 0.0.
 
-*Peso alto (0.35) porque relevância de conteúdo é o critério principal de recomendação.*
+**2. Boost de co-ocorrência (0.25 no padrão / 0.20 no personalizado)**
 
-**2. Boost de co-ocorrência (peso 0.25 — descoberta)**
+Expande a busca além das tags exatas. Se `Young_Hearts_Run_Free` costuma
+aparecer junto de `Superunknown`, então posts com essa tag relacionada também
+recebem boost proporcional ao número de co-ocorrências.
 
-Expande a busca além das tags exatas. Se a tag `Young_Hearts_Run_Free` costuma aparecer junto de `Superunknown` nos posts, então ao buscar pela primeira, posts com a segunda também recebem um boost proporcional ao número de co-ocorrências.
+**3. Fator de recência (0.15 em ambos os modos)**
 
-*Serve para descobrir conteúdo que pessoas com gostos parecidos também curtem — mesmo que não tenha a tag exata.*
+Posts temporalmente próximos ao timestamp de entrada recebem pontuação maior. O
+decaimento segue a fórmula `exp(-0.01 × Δdias)`: posts do mesmo dia têm fator
+próximo de 1.0; posts muito distantes no tempo perdem força.
 
-**3. Fator de recência (peso 0.15 — contexto temporal)**
+**4. Influência social (0.15 em ambos os modos)**
 
-Posts temporalmente próximos ao timestamp de entrada recebem pontuação maior. O decaimento segue a fórmula `exp(−0.01 × Δdias)`: posts do mesmo dia têm fator ≈ 1.0; posts de 1 ano antes/depois têm fator ≈ 0.03.
+Cada usuário tem um **grau** no grafo social: o número de amigos que possui.
+Quando usuários altamente conectados interagem com um post, esse post tende a
+receber score maior.
 
-*Peso menor (0.15) porque relevância de conteúdo deve prevalecer sobre data.*
+**5. Popularidade (0.10 configurável no modo padrão/fallback)**
 
-**4. Influência social (peso 0.15 — alcance no grafo)**
+Mede a intensidade histórica de interações nas tags do post
+(`popularidade.npy`). Esse peso pode ser ajustado no CLI/API com
+`peso_popularidade`.
 
-Cada usuário tem um **grau** no grafo social: o número de amigos que possui. Quando um usuário altamente conectado (influenciador) interage com um post, esse post provavelmente é relevante para muita gente. O sinal é pré-calculado no treino usando o `user_social_graph.parquet`, sem precisar da identidade do usuário em tempo de inferência.
+**6. Afinidade usuário-item (0.20 no modo personalizado)**
 
-*Ajuda a surfacar conteúdo popular entre pessoas bem conectadas, complementando os sinais de conteúdo.*
+Resume o quanto as tags do post combinam com o perfil do usuário, agregando
+interesses explícitos, interações recentes com decaimento temporal e sinais
+sociais dos vizinhos no grafo.
 
-| Sinal | Peso | O que prioriza |
-|---|---|---|
-| Similaridade de conteúdo | 0.35 | Posts com as mesmas tags |
-| Co-ocorrência de tags | 0.25 | Posts com tags relacionadas (descoberta) |
-| Recência relativa | 0.15 | Posts temporalmente próximos |
-| Influência social | 0.15 | Posts curtidos por usuários influentes |
-| Popularidade | 0.10 (configurável) | Posts com tags historicamente mais engajadas |
+| Sinal | Peso (padrão) | Peso (personalizado) | O que prioriza |
+|---|---|---|---|
+| Similaridade de conteúdo | 0.35 | 0.30 | Posts com as mesmas tags |
+| Co-ocorrência de tags | 0.25 | 0.20 | Posts com tags relacionadas |
+| Recência relativa | 0.15 | 0.15 | Posts temporalmente próximos |
+| Influência social | 0.15 | 0.15 | Posts interagidos por usuários influentes |
+| Popularidade | 0.10 (configurável) | - | Tags historicamente mais engajadas |
+| Afinidade usuário-item | - | 0.20 | Tags mais aderentes ao perfil do usuário |
