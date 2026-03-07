@@ -33,6 +33,10 @@ treinamento/dados/
 
 # ── Artefatos do modelo treinado ──────────────────────────────────────────────
 treinamento/modelo/
+treinamento/modelos/
+
+# ── Resultados e benchmarks de avaliação ──────────────────────────────────────
+avaliacao/resultados/
 
 # ── Scripts temporários de manutenção ─────────────────────────────────────────
 fix_readme*.py
@@ -58,3 +62,4 @@ desktop.ini
 *.log
 *.tmp
 *.bak
+.pipeline_state.json

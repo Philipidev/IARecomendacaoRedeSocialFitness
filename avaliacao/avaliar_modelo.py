@@ -3,30 +3,33 @@ from __future__ import annotations
 import argparse
 import ast
 import json
-import pickle
+import sys
 from collections import Counter, defaultdict
-from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
+from time import perf_counter
 from typing import Iterable
 
 import numpy as np
 import pandas as pd
-from sklearn.metrics.pairwise import cosine_similarity
 
 ROOT = Path(__file__).resolve().parent.parent
-MODELO_DIR = ROOT / "treinamento" / "modelo"
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+
+from progress_utils import IterationProgress
+from treinamento.model_utils import (
+    infer_model_family,
+    model_id_from_dir,
+    rel_path,
+    resolve_model_dir,
+)
+from treinamento.rankers import load_ranker
+
 SPLITS_DIR = ROOT / "treinamento" / "dados" / "splits"
 OUTPUT_DIR = ROOT / "extracao_filtragem" / "output"
 RESULTADOS_DIR = ROOT / "avaliacao" / "resultados"
-
-PESO_COSINE = 0.40
-PESO_COOC = 0.25
-PESO_TIME = 0.15
-PESO_SOCIAL = 0.20
-LAMBDA_DECAY = 0.01
 MS_POR_DIA = 86_400_000
-
 K_PADRAO = [5, 10, 20]
 
 
@@ -50,71 +53,17 @@ def _normalizar_k(lista_k: Iterable[int]) -> list[int]:
 
 
 def _detectar_coluna_tempo(interactions: pd.DataFrame) -> str | None:
-    candidatas = [
+    for col in [
         "event_timestamp",
         "event_time",
         "timestamp",
         "created_at",
         "interaction_date",
         "creation_date",
-    ]
-    for col in candidatas:
+    ]:
         if col in interactions.columns:
             return col
     return None
-
-
-@dataclass
-class ArtefatosModelo:
-    vectorizer: object
-    post_matrix: np.ndarray
-    cooccurrence_map: dict[str, list[tuple[str, float]]]
-    social_scores: np.ndarray
-    posts_cache: pd.DataFrame
-
-
-def carregar_artefatos_modelo() -> ArtefatosModelo:
-    obrigatorios = [
-        "vectorizer.pkl",
-        "post_matrix.npy",
-        "tag_cooccurrence_map.pkl",
-        "posts_cache.parquet",
-    ]
-    faltantes = [nome for nome in obrigatorios if not (MODELO_DIR / nome).exists()]
-    if faltantes:
-        raise FileNotFoundError(
-            "Artefatos ausentes em treinamento/modelo/: "
-            + ", ".join(faltantes)
-            + "\nExecute: python treinamento/treinar.py"
-        )
-
-    with open(MODELO_DIR / "vectorizer.pkl", "rb") as f:
-        vectorizer = pickle.load(f)
-
-    post_matrix = np.load(MODELO_DIR / "post_matrix.npy")
-
-    with open(MODELO_DIR / "tag_cooccurrence_map.pkl", "rb") as f:
-        cooccurrence_map = pickle.load(f)
-
-    social_path = MODELO_DIR / "social_scores.npy"
-    social_scores = np.load(social_path) if social_path.exists() else np.zeros(post_matrix.shape[0], dtype=np.float32)
-
-    posts_cache = pd.read_parquet(MODELO_DIR / "posts_cache.parquet")
-    posts_cache["tags_fitness"] = posts_cache["tags_fitness"].apply(_parse_tags)
-
-    if len(posts_cache) != post_matrix.shape[0]:
-        raise ValueError(
-            "Inconsistência entre posts_cache.parquet e post_matrix.npy "
-            f"({len(posts_cache)} vs {post_matrix.shape[0]})."
-        )
-
-    return ArtefatosModelo(
-        vectorizer=vectorizer,
-        post_matrix=post_matrix,
-        cooccurrence_map=cooccurrence_map,
-        social_scores=social_scores,
-        posts_cache=posts_cache,
-    )
 
 
 def carregar_splits_teste() -> tuple[pd.DataFrame, pd.DataFrame]:
@@ -132,97 +81,73 @@ def carregar_splits_teste() -> tuple[pd.DataFrame, pd.DataFrame]:
     return test_posts, test_interactions
 
 
-def construir_mapa_message_id() -> dict[int, int]:
+def construir_mapa_message_id_global() -> dict[int, int]:
     msgs_path = OUTPUT_DIR / "messages_fitness.parquet"
     if not msgs_path.exists():
         return {}
-
     msgs_df = pd.read_parquet(msgs_path)
     if "message_id" not in msgs_df.columns:
         return {}
-
     return {idx: int(mid) for idx, mid in enumerate(msgs_df["message_id"].tolist())}
 
 
-def _score_cosine(vectorizer, post_matrix: np.ndarray, tags: list[str]) -> np.ndarray:
-    x = vectorizer.transform([tags]).astype(np.float32)
-    if x.sum() == 0:
-        return np.zeros(post_matrix.shape[0], dtype=np.float32)
-    return cosine_similarity(x, post_matrix).flatten().astype(np.float32)
+def construir_lookup_catalogo(ranker) -> tuple[dict[int, int], dict[int, int]]:
+    posts = ranker.artifacts.posts_cache
+    message_to_row: dict[int, int] = {}
+    if "_message_id" in posts.columns:
+        values = pd.to_numeric(posts["_message_id"], errors="coerce")
+        for row_pos, value in enumerate(values):
+            if pd.notna(value):
+                message_to_row[int(value)] = row_pos
 
-
-def _score_cooccurrence(
-    cooccurrence_map: dict[str, list[tuple[str, float]]],
-    classes_conhecidas: set[str],
-    posts_tags: pd.Series,
-    tags_entrada: list[str],
-) -> np.ndarray:
-    boost_por_tag: dict[str, float] = {}
-    for tag in tags_entrada:
-        for tag_vizinha, peso in cooccurrence_map.get(tag, []):
-            if tag_vizinha in classes_conhecidas:
-                boost_por_tag[tag_vizinha] = boost_por_tag.get(tag_vizinha, 0.0) + float(peso)
-
-    if not boost_por_tag:
-        return np.zeros(len(posts_tags), dtype=np.float32)
-
-    scores = np.zeros(len(posts_tags), dtype=np.float32)
-    for i, tags_post in enumerate(posts_tags):
-        for tag in tags_post:
-            scores[i] += boost_por_tag.get(tag, 0.0)
-
-    max_score = float(scores.max())
-    if max_score > 0:
-        scores /= max_score
-    return scores
-
-
-def _score_time_decay(posts_cache: pd.DataFrame, timestamp_entrada: int) -> np.ndarray:
-    if "creation_date" not in posts_cache.columns:
-        return np.ones(len(posts_cache), dtype=np.float32)
-    tempos = posts_cache["creation_date"].values.astype(np.float64)
-    delta = np.abs(tempos - float(timestamp_entrada)) / MS_POR_DIA
-    return np.exp(-LAMBDA_DECAY * delta).astype(np.float32)
+    fallback_catalog = construir_mapa_message_id_global()
+    return message_to_row, fallback_catalog
 
 
 def recomendar_ids(
-    artefatos: ArtefatosModelo,
+    ranker,
     tags_referencia: list[str],
     timestamp_referencia: int,
     top_k: int,
 ) -> tuple[list[int], list[list[str]], list[float], list[int]]:
-    posts = artefatos.posts_cache
-    tags_norm = [t.strip() for t in tags_referencia if str(t).strip()]
-    if not tags_norm:
+    df = ranker.recommend_df(
+        tags=tags_referencia,
+        timestamp=timestamp_referencia,
+        top_k=top_k,
+        include_internal=True,
+    )
+    if df.empty:
         return [], [], [], []
 
-    sc = _score_cosine(artefatos.vectorizer, artefatos.post_matrix, tags_norm)
-    si = _score_cooccurrence(
-        artefatos.cooccurrence_map,
-        set(artefatos.vectorizer.classes_),
-        posts["tags_fitness"],
-        tags_norm,
-    )
-    st = _score_time_decay(posts, timestamp_referencia)
-    ss = artefatos.social_scores if len(artefatos.social_scores) == len(posts) else np.zeros(len(posts), dtype=np.float32)
+    rec_ids: list[int] = []
+    rec_tags: list[list[str]] = []
+    rec_scores: list[float] = []
+    rec_catalog_idxs: list[int] = []
 
-    score_final = PESO_COSINE * sc + PESO_COOC * si + PESO_TIME * st + PESO_SOCIAL * ss
-    ordem = np.argsort(-score_final)
+    index_col = "index" if "index" in df.columns else None
+    if index_col is None and ranker.artifacts.posts_cache.index.name in df.columns:
+        index_col = ranker.artifacts.posts_cache.index.name
 
-    tags_set_ref = set(tags_norm)
-    ids, tags, scores, idxs = [], [], [], []
-    for i in ordem:
-        tags_post = posts.iloc[int(i)]["tags_fitness"]
-        if set(tags_post) == tags_set_ref:
+    for _, row in df.iterrows():
+        if "_message_id" in row and pd.notna(row["_message_id"]):
+            rec_ids.append(int(row["_message_id"]))
+        else:
             continue
-        ids.append(int(posts.iloc[int(i)].name))
-        tags.append(list(tags_post))
-        scores.append(float(score_final[int(i)]))
-        idxs.append(int(i))
-        if len(ids) >= top_k:
-            break
 
-    return ids, tags, scores, idxs
+        rec_tags.append(_parse_tags(row.get("tags_fitness", [])))
+        rec_scores.append(float(row.get("relevance_score", 0.0)))
+        if "_catalog_index" in row and pd.notna(row["_catalog_index"]):
+            rec_catalog_idxs.append(
+                int(ranker.artifacts.posts_cache.index.get_loc(int(row["_catalog_index"])))
+            )
+        elif index_col is not None and pd.notna(row[index_col]):
+            rec_catalog_idxs.append(
+                int(ranker.artifacts.posts_cache.index.get_loc(int(row[index_col])))
+            )
+        else:
+            rec_catalog_idxs.append(len(rec_catalog_idxs))
+
+    return rec_ids, rec_tags, rec_scores, rec_catalog_idxs
 
 
 def precision_at_k(relevantes: set[int], recomendados: list[int], k: int) -> float:
@@ -274,6 +199,13 @@ def ndcg_at_k(relevantes: set[int], recomendados: list[int], k: int) -> float:
     return float(dcg / idcg)
 
 
+def mrr_at_k(relevantes: set[int], recomendados: list[int], k: int) -> float:
+    for i, rec in enumerate(recomendados[:k], start=1):
+        if rec in relevantes:
+            return 1.0 / i
+    return 0.0
+
+
 def diversidade_intra_lista(tags_recomendadas: list[list[str]]) -> float:
     n = len(tags_recomendadas)
     if n < 2:
@@ -309,16 +241,29 @@ def _timestamp_em_ms(valor) -> int | None:
         return None
 
 
-def avaliar(artefatos: ArtefatosModelo, ks: list[int]) -> tuple[dict, pd.DataFrame, pd.DataFrame]:
+def _total_consultas_candidatas(interactions: pd.DataFrame) -> int:
+    return int(
+        sum(
+            max(len(grupo) - 1, 0)
+            for _, grupo in interactions.groupby("user_id")
+        )
+    )
+
+
+def avaliar(
+    ranker,
+    ks: list[int],
+    model_dir: Path,
+) -> tuple[dict, pd.DataFrame, pd.DataFrame]:
     _, test_interactions = carregar_splits_teste()
-    mapa_idx_message = construir_mapa_message_id()
+    message_to_row, fallback_catalog = construir_lookup_catalogo(ranker)
 
     if "message_id" not in test_interactions.columns or "user_id" not in test_interactions.columns:
         raise ValueError("test_interactions.parquet precisa conter as colunas user_id e message_id.")
 
     tempo_col = _detectar_coluna_tempo(test_interactions)
     if tempo_col is None:
-        posts_cache = artefatos.posts_cache
+        posts_cache = ranker.artifacts.posts_cache
         if "creation_date" in posts_cache.columns and posts_cache.index.name is not None:
             tempo_col = "__fallback_order"
             test_interactions = test_interactions.reset_index(drop=True)
@@ -333,11 +278,21 @@ def avaliar(artefatos: ArtefatosModelo, ks: list[int]) -> tuple[dict, pd.DataFra
     if test_interactions["__ts_ms"].isna().all():
         test_interactions["__ts_ms"] = np.arange(len(test_interactions), dtype=np.int64)
 
-    catalogo_total = len(artefatos.posts_cache)
+    catalogo_total = len(ranker.artifacts.posts_cache)
     uso_catalogo = set()
     ilads = []
     novidades = []
     recencias = []
+    latencias_ms = []
+    total_queries_candidatas = _total_consultas_candidatas(test_interactions)
+    progress = IterationProgress(
+        total=total_queries_candidatas,
+        label=f"Avaliação {model_id_from_dir(model_dir)}",
+        every_percent=5,
+    )
+    if total_queries_candidatas > 0:
+        progress.start("Processando consultas candidatas")
+    processed_queries = 0
 
     linhas_q = []
     acumuladores = {k: defaultdict(list) for k in ks}
@@ -351,77 +306,92 @@ def avaliar(artefatos: ArtefatosModelo, ks: list[int]) -> tuple[dict, pd.DataFra
             continue
 
         for i, evento in enumerate(eventos[:-1]):
-            mensagem_ref = int(evento["message_id"])
-            ts_ref = int(evento["__ts_ms"])
+            processed_queries += 1
+            try:
+                mensagem_ref = int(evento["message_id"])
+                ts_ref = int(evento["__ts_ms"])
 
-            futuros = {int(x["message_id"]) for x in eventos[i + 1 :]}
-            if not futuros:
-                continue
-
-            idx_ref = None
-            for idx, mid in mapa_idx_message.items():
-                if mid == mensagem_ref:
-                    idx_ref = idx
-                    break
-            if idx_ref is None or idx_ref not in artefatos.posts_cache.index:
-                continue
-
-            post_ref = artefatos.posts_cache.loc[idx_ref]
-            tags_ref = _parse_tags(post_ref.get("tags_fitness", []))
-            timestamp_ref = int(post_ref.get("creation_date", ts_ref))
-
-            rec_ids_idx, rec_tags, rec_scores, rec_local_idxs = recomendar_ids(
-                artefatos,
-                tags_referencia=tags_ref,
-                timestamp_referencia=timestamp_ref,
-                top_k=max(ks),
-            )
-
-            rec_ids_message = [mapa_idx_message.get(idx, -1) for idx in rec_ids_idx]
-            rec_ids_message = [r for r in rec_ids_message if r != -1]
-
-            if not rec_ids_message:
-                continue
-
-            uso_catalogo.update(rec_local_idxs)
-            ilads.append(diversidade_intra_lista(rec_tags))
-
-            for local_idx in rec_local_idxs:
-                rec_msg = mapa_idx_message.get(int(artefatos.posts_cache.iloc[local_idx].name), None)
-                if rec_msg is None:
+                futuros = {int(x["message_id"]) for x in eventos[i + 1 :]}
+                if not futuros:
                     continue
-                freq = pop.get(rec_msg, 0)
-                novidades.append(1.0 / np.log2(freq + 2.0))
 
-                if "creation_date" in artefatos.posts_cache.columns:
-                    rec_ts = int(artefatos.posts_cache.iloc[local_idx]["creation_date"])
-                    recencias.append(abs(rec_ts - ts_ref) / MS_POR_DIA)
+                if mensagem_ref in message_to_row:
+                    row_pos_ref = message_to_row[mensagem_ref]
+                    post_ref = ranker.artifacts.posts_cache.iloc[row_pos_ref]
+                else:
+                    idx_ref = None
+                    for idx, mid in fallback_catalog.items():
+                        if mid == mensagem_ref:
+                            idx_ref = idx
+                            break
+                    if idx_ref is None or idx_ref not in ranker.artifacts.posts_cache.index:
+                        continue
+                    post_ref = ranker.artifacts.posts_cache.loc[idx_ref]
 
-            for k in ks:
-                acumuladores[k]["precision"].append(precision_at_k(futuros, rec_ids_message, k))
-                acumuladores[k]["recall"].append(recall_at_k(futuros, rec_ids_message, k))
-                acumuladores[k]["hitrate"].append(hitrate_at_k(futuros, rec_ids_message, k))
-                acumuladores[k]["map"].append(map_at_k(futuros, rec_ids_message, k))
-                acumuladores[k]["ndcg"].append(ndcg_at_k(futuros, rec_ids_message, k))
+                tags_ref = _parse_tags(post_ref.get("tags_fitness", []))
+                timestamp_ref = int(post_ref.get("creation_date", ts_ref))
 
-            linhas_q.append(
-                {
-                    "user_id": int(user_id),
-                    "message_id_referencia": mensagem_ref,
-                    "timestamp_referencia_ms": ts_ref,
-                    "n_relevantes_futuros": len(futuros),
-                    "n_recomendados": len(rec_ids_message),
-                    "top1_recomendado": rec_ids_message[0] if rec_ids_message else None,
-                    "top1_score": rec_scores[0] if rec_scores else None,
-                }
-            )
+                started = perf_counter()
+                rec_ids_message, rec_tags, rec_scores, rec_local_idxs = recomendar_ids(
+                    ranker,
+                    tags_referencia=tags_ref,
+                    timestamp_referencia=timestamp_ref,
+                    top_k=max(ks),
+                )
+                latencias_ms.append((perf_counter() - started) * 1000.0)
+
+                if not rec_ids_message:
+                    continue
+
+                uso_catalogo.update(rec_local_idxs)
+                ilads.append(diversidade_intra_lista(rec_tags))
+
+                for local_idx in rec_local_idxs:
+                    rec_msg = None
+                    if "_message_id" in ranker.artifacts.posts_cache.columns and local_idx < len(
+                        ranker.artifacts.posts_cache
+                    ):
+                        maybe_mid = ranker.artifacts.posts_cache.iloc[local_idx].get("_message_id")
+                        if pd.notna(maybe_mid):
+                            rec_msg = int(maybe_mid)
+                    if rec_msg is None:
+                        continue
+                    freq = pop.get(rec_msg, 0)
+                    novidades.append(1.0 / np.log2(freq + 2.0))
+
+                    if "creation_date" in ranker.artifacts.posts_cache.columns:
+                        rec_ts = int(ranker.artifacts.posts_cache.iloc[local_idx]["creation_date"])
+                        recencias.append(abs(rec_ts - ts_ref) / MS_POR_DIA)
+
+                for k in ks:
+                    acumuladores[k]["precision"].append(precision_at_k(futuros, rec_ids_message, k))
+                    acumuladores[k]["recall"].append(recall_at_k(futuros, rec_ids_message, k))
+                    acumuladores[k]["hitrate"].append(hitrate_at_k(futuros, rec_ids_message, k))
+                    acumuladores[k]["map"].append(map_at_k(futuros, rec_ids_message, k))
+                    acumuladores[k]["ndcg"].append(ndcg_at_k(futuros, rec_ids_message, k))
+                    acumuladores[k]["mrr"].append(mrr_at_k(futuros, rec_ids_message, k))
+
+                linhas_q.append(
+                    {
+                        "user_id": int(user_id),
+                        "message_id_referencia": mensagem_ref,
+                        "timestamp_referencia_ms": ts_ref,
+                        "n_relevantes_futuros": len(futuros),
+                        "n_recomendados": len(rec_ids_message),
+                        "top1_recomendado": rec_ids_message[0] if rec_ids_message else None,
+                        "top1_score": rec_scores[0] if rec_scores else None,
+                    }
+                )
+            finally:
+                if total_queries_candidatas > 0:
+                    progress.log(processed_queries)
 
     rows_metricas = []
     resumo_metricas = {}
 
     for k in ks:
         metricas_k = {}
-        for nome in ["precision", "recall", "hitrate", "map", "ndcg"]:
+        for nome in ["precision", "recall", "hitrate", "map", "ndcg", "mrr"]:
             valores = acumuladores[k][nome]
             media = float(np.mean(valores)) if valores else 0.0
             metricas_k[f"{nome}@{k}"] = media
@@ -439,8 +409,13 @@ def avaliar(artefatos: ArtefatosModelo, ks: list[int]) -> tuple[dict, pd.DataFra
 
     metadata = {
         "generated_at_utc": datetime.now(timezone.utc).isoformat(),
+        "model_dir": rel_path(model_dir),
+        "model_id": model_id_from_dir(model_dir),
+        "family": infer_model_family(model_dir),
         "n_queries_validas": len(linhas_q),
         "ks": ks,
+        "latencia_inferencia_ms_p50": float(np.percentile(latencias_ms, 50)) if latencias_ms else 0.0,
+        "latencia_inferencia_ms_p95": float(np.percentile(latencias_ms, 95)) if latencias_ms else 0.0,
         "protocolo": (
             "Para cada usuário no split de teste, ordena interações por tempo. "
             "Cada interação vira item de referência; o ground truth é o conjunto de interações futuras do mesmo usuário. "
@@ -454,16 +429,24 @@ def avaliar(artefatos: ArtefatosModelo, ks: list[int]) -> tuple[dict, pd.DataFra
         "business_metrics": resumo_negocio,
     }
 
+    if total_queries_candidatas > 0:
+        progress.finish(f"Consultas válidas: {len(linhas_q)}")
+
     return resumo, pd.DataFrame(rows_metricas), pd.DataFrame(linhas_q)
 
 
-def salvar_resultados(resumo: dict, df_metricas: pd.DataFrame, df_queries: pd.DataFrame) -> tuple[Path, Path, Path]:
-    RESULTADOS_DIR.mkdir(parents=True, exist_ok=True)
+def salvar_resultados(
+    resumo: dict,
+    df_metricas: pd.DataFrame,
+    df_queries: pd.DataFrame,
+    out_dir: Path,
+) -> tuple[Path, Path, Path]:
+    out_dir.mkdir(parents=True, exist_ok=True)
 
-    caminho_json = RESULTADOS_DIR / "metricas_resumo.json"
-    caminho_csv = RESULTADOS_DIR / "metricas_ranking_por_k.csv"
-    caminho_md = RESULTADOS_DIR / "resumo_avaliacao.md"
-    caminho_queries = RESULTADOS_DIR / "queries_avaliadas.csv"
+    caminho_json = out_dir / "metricas_resumo.json"
+    caminho_csv = out_dir / "metricas_ranking_por_k.csv"
+    caminho_md = out_dir / "resumo_avaliacao.md"
+    caminho_queries = out_dir / "queries_avaliadas.csv"
 
     with open(caminho_json, "w", encoding="utf-8") as f:
         json.dump(resumo, f, ensure_ascii=False, indent=2)
@@ -488,6 +471,12 @@ def salvar_resultados(resumo: dict, df_metricas: pd.DataFrame, df_queries: pd.Da
     linhas_md.append(f"- **Diversidade intra-lista (tags)**: {resumo['business_metrics']['intra_list_diversity_tags']:.4f}\n")
     linhas_md.append(f"- **Novidade (popularidade inversa)**: {resumo['business_metrics']['novelty_inverse_popularity']:.4f}\n")
     linhas_md.append(f"- **Recência média recomendada (dias)**: {resumo['business_metrics']['avg_recommended_recency_days']:.4f}\n")
+    linhas_md.append(
+        f"- **Latência p50 (ms)**: {resumo['metadata']['latencia_inferencia_ms_p50']:.4f}\n"
+    )
+    linhas_md.append(
+        f"- **Latência p95 (ms)**: {resumo['metadata']['latencia_inferencia_ms_p95']:.4f}\n"
+    )
 
     with open(caminho_md, "w", encoding="utf-8") as f:
         f.writelines(linhas_md)
@@ -504,15 +493,34 @@ def main() -> None:
         type=int,
         help="Lista de K para métricas de ranking (ex: --k 5 10 20)",
     )
+    parser.add_argument(
+        "--model-dir",
+        type=str,
+        default="treinamento/modelo",
+        help="Diretório do modelo/ranker a ser avaliado",
+    )
+    parser.add_argument(
+        "--out-dir",
+        type=str,
+        default=str(RESULTADOS_DIR),
+        help="Diretório de saída dos arquivos da avaliação",
+    )
     args = parser.parse_args()
 
     ks = _normalizar_k(args.k)
+    model_dir = resolve_model_dir(args.model_dir)
+    out_dir = Path(args.out_dir)
+    if not out_dir.is_absolute():
+        out_dir = ROOT / out_dir
 
-    artefatos = carregar_artefatos_modelo()
-    resumo, df_metricas, df_queries = avaliar(artefatos, ks)
-    caminho_json, caminho_csv, caminho_md = salvar_resultados(resumo, df_metricas, df_queries)
+    ranker = load_ranker(model_dir)
+    resumo, df_metricas, df_queries = avaliar(ranker, ks, model_dir)
+    caminho_json, caminho_csv, caminho_md = salvar_resultados(
+        resumo, df_metricas, df_queries, out_dir
+    )
 
     print("=== Avaliação concluída ===")
+    print(f"Modelo avaliado  : {model_dir}")
     print(f"Consultas avaliadas: {resumo['metadata']['n_queries_validas']}")
     print(f"Resultados JSON : {caminho_json}")
     print(f"Resultados CSV  : {caminho_csv}")

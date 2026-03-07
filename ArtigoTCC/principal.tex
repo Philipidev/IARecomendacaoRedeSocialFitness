@@ -1,0 +1,721 @@
+\documentclass[a4paper,12pt]{article}
+
+\usepackage{abakos}
+\usepackage{abntex2cite} 
+\usepackage{tikz}
+\usepackage{float}
+\usepackage{amssymb} % Para \checkmark
+
+\usetikzlibrary{positioning,arrows.meta,shadows.blur,fit} 
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%Capa da revista
+%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+%\setcounter{page}{80} %iniciar contador de pagina de valor especificado, quando o artigo for alocado a uma edição
+\newcommand{\monog}{FitConnect: rede social de atividade física com interação social, geolocalização e privacidade}
+\newcommand{\monogES}{FitConnect: a \textit{social network} for physical activity with geolocation and privacy-preserving features}
+\newcommand{\origem}{Brasil}
+\newcommand{\editorial}{\textbf{Abakós}, Belo Horizonte, v. 8, n. 2, p. 00-00, Jul. 2021 - ISSN: 2316-9451}  % p. xx-xx – páginas inicial-final do artigo
+% \newcommand{\lcc}{\scriptsize{Licença Creative Commons Attribution-NonCommercial-NoDerivs 3.0 Unported}}
+
+%%%%%%%%%%%%%%%%%INFORMAÇÕES SOBRE AUTORES %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+% Autor A
+\newcommand{\AutorA}{Izabela Castanheira Galinari}
+\newcommand{\funcaoA}{}
+\newcommand{\cursA}{Engenharia de Computação}
+\newcommand{\emailA}{izabela.galinari02@gmail.com}
+
+% Autor B
+\newcommand{\AutorB}{Philipi Gariglio Carvalho Faustino Altoe}
+\newcommand{\funcaoB}{}
+\newcommand{\cursB}{Engenharia de Computação}
+\newcommand{\emailB}{philipigariglio@gmail.com}
+
+% Autor C
+\newcommand{\AutorC}{Raphael Lulli Duarte Tanos Galdino}
+\newcommand{\funcaoC}{}
+\newcommand{\cursC}{Engenharia de Computação}
+\newcommand{\emailC}{raphaellulli@hotmail.com}
+
+\newcommand{\AutorD}{Felipe Augusto Lara Soares}
+\newcommand{\funcaoD}{}
+\newcommand{\cursD}{Engenharia de Computação}
+\newcommand{\emailD}{felipesoares@pucminas.br}
+
+\newcommand{\keyword}[1]{\textsf{#1}}
+
+\begin{document}
+
+% %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+% %% Pagina de titulo
+% %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+\begin{flushleft}
+\begin{minipage} [c][5cm][b]{16.5cm} % Cabeçalho da primeira página da revista
+\includegraphics[scale=1.1]{figuras/pucmg.png} 
+\end{minipage}
+ \vspace{0cm} { %Rodapé das páginas da revista
+ \singlespacing \Large{\monog \symbolfootnote[1]{Submetido em DD/MM/AAAA - Aceito em DD/MM/AAAA} \\ }
+  \normalsize{\monogES}
+ }
+\end{flushleft}
+
+\begin{flushright}
+\singlespacing
+\normalsize{\AutorA \footnote{\funcaoA \cursA, \origem -- \emailA}} \\
+\normalsize{\AutorB \footnote{\funcaoB \cursB, \origem -- \emailB}} \\
+\normalsize{\AutorC \footnote{\funcaoC \cursC, \origem -- \emailC}} \\
+\normalsize{\AutorD \footnote{\funcaoD \cursD, \origem -- \emailD}} \\
+\end{flushright}
+\thispagestyle{empty}
+
+\begin{abstract}
+\noindent
+Este artigo apresenta o desenvolvimento de um aplicativo baseado em Inteligência Artificial (IA), com foco na prática de atividade física e melhora de hábitos saudáveis. Utilizando Smart Nudges e IA de recomendação como filtragem colaborativa neural (NCF), o sistema conecta pessoas para treinar juntas por meio de descoberta por proximidade, recomendação contextual, com privacidade por padrão. A interface web e app, construídas com as linguagens React, C\texttt{\#} e React Native, organiza posts que registram treinos, alimentam o feed e permitem controles claros de visibilidade e compartilhamento. O sistema permite interação através de postagem, curtidas e compartilhamentos e agendamento de treinos em conjunto. Durante os testes, foram obtidas métricas de desempenho como redução de 96,6\% no erro de previsão do modelo de recomendação. Na etapa de recomendação de atividades e de perfis, o sistema foi avaliado em cenários práticos, alcançando 100\% de acerto nos cenários de validação dos Smart Nudges, resultando em uma indicação correta adaptada ao perfil do usuário.
+\\\textbf{\keyword{Palavras-chave: }}Rede Social, Atividade Física, Sistemas de Recomendação, Inteligência Artificial
+\end{abstract}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\newpage 
+\selectlanguage{english}
+\begin{abstract}
+\noindent
+This article presents the development of an Artificial Intelligence (AI)-based application focused on physical activity and the improvement of healthy habits. Using Smart Nudges and AI like neural collaborative filtering (NCF), the system connects people to train together through proximity-based discovery, contextual recommendation, with privacy by default. The web and app interface, built with React, C\texttt{\#} and React Native, organizes posts that record workouts, populate the feed, and enable clear controls over visibility and sharing. The system allows interaction through posting, likes and shares, as well as scheduling joint training sessions. During testing, performance metrics were obtained such as a 96.6\% reduction in prediction error for the recommendation model. In the activity and profile recommendation stage, the system was evaluated in practical scenarios, achieving 100\% accuracy in Smart Nudges validation scenarios, resulting in an accurate recommendation tailored to the user's profile.
+\\\textbf{\keyword{Keywords: }}Social Network, Physical Activity, Recommendation Systems, Artificial Intelligence
+\end{abstract}
+
+\newpage
+
+\selectlanguage{brazilian}
+ \onehalfspace  % espaçamento 1.5 entre linhas
+ \setlength{\parindent}{1.25cm}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%% INICIO DO TEXTO
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+\section{Introdução}
+
+A prática insuficiente de atividade física permanece um desafio relevante de saúde pública no Brasil. Dados recentes do \cite{Vigitel2023} indicam que os indicadores de atividade física nas capitais ainda exigem políticas e soluções que reduzam o sedentarismo e promovam rotinas ativas. Em linha com as diretrizes da Organização Mundial da Saúde, recomenda-se, para adultos, ao menos 150 a 300 minutos semanais de atividade aeróbica moderada, meta que parcela expressiva da população não alcança \cite{WHO2020}.
+
+Nesse contexto, intervenções digitais voltadas à promoção da saúde têm se mostrado promissoras, especialmente quando incorporam elementos sociais, metas e mecanismos de engajamento. Ensaios randomizados controlados apontam efeitos positivos do uso de recursos como metas progressivas, sobretudo quando tais elementos são adequadamente ajustados ao perfil do público-alvo \cite{SANUDO2024102590}. Nesse sentido, recomendações individualizadas tornam-se mais úteis e acionáveis quando consideram não apenas preferências do usuário, mas também informações contextuais, como localização, horário, rotina e restrições.
+
+Diante desse cenário, este trabalho tem como foco investigar o uso de uma Inteligência Artificial de recomendação aplicada ao incentivo à prática de atividades físicas. A proposta central consiste no desenvolvimento e estudo de um sistema capaz de recomendar, de forma personalizada, atividades, locais de prática e possibilidades de interação com usuários de perfil semelhante, considerando características individuais, histórico de uso, contexto e proximidade. Assim, o núcleo do trabalho não está no aplicativo em si, mas no modelo de recomendação que sustenta a personalização das sugestões e busca favorecer maior aderência à prática de exercícios físicos.
+
+Para viabilizar a implementação e a avaliação dessa proposta, o modelo de recomendação foi integrado ao FitConnect, aplicativo concebido como interface de interação entre usuário e sistema. No aplicativo, os usuários podem publicar registros sobre as atividades que realizam e os locais em que treinam, gerando dados que alimentam o processo de recomendação. A partir dessas informações, a IA organiza sugestões com base em proximidade, interesse e similaridade entre perfis, oferecendo ao usuário recomendações mais relevantes e contextualizadas.
+
+Em síntese, este trabalho propõe o desenvolvimento de um sistema de recomendação baseado em Inteligência Artificial, integrado a um aplicativo social de apoio à prática de atividades físicas. A contribuição principal consiste em investigar de que maneira recomendações personalizadas e contextuais podem favorecer o engajamento, a regularidade e a aproximação entre usuários com interesses e perfis semelhantes, tendo o aplicativo como ambiente de coleta de dados, interação e disponibilização das recomendações.
+
+O restante do artigo está organizado da seguinte forma: na Seção 2, são apresentados os fundamentos teóricos, com destaque para Sistemas de Recomendação e Gamificação em Saúde Digital. A Seção 3 analisa os trabalhos correlatos, enquanto a Seção 4 descreve a metodologia adotada. Na Seção 5, discutem-se os experimentos realizados e os resultados obtidos.
+
+
+\section{Fundamentação Teórica}
+
+Esta seção apresenta os fundamentos teóricos do trabalho, abrangendo sistemas de recomendação e gamificação em saúde digital. Sintetizam-se definições, famílias e sinais usados na personalização, bem como princípios de motivação e reforço social, com atenção à transparência e à privacidade.
+
+\subsection{Sistemas de Recomendação}
+
+O FitConnect foi estruturado em um \textit{pipeline} de três estágios sequenciais, combinando dois modelos de Inteligência Artificial com regras de código para otimizar eficiência e interpretabilidade:
+\begin{enumerate}
+    \item Recuperação (\textit{Retrieval}) -- Código: o sistema aplica filtros simples baseados em regras para selecionar rapidamente candidatos relevantes. São aplicados critérios como modalidade preferida do usuário, frescor do conteúdo (posts dos últimos 14 dias) e compatibilidade de visibilidade. Esta etapa reduz o universo de 50.000 posts para aproximadamente 2.000 candidatos em milissegundos, sem necessidade de modelo neural.
+
+    
+    
+    \item Pontuação (\textit{Scoring}) -- Inteligência Artificial: os candidatos selecionados são pontuados pelo modelo \textit{Neural Collaborative Filtering} (NCF), uma rede neural que aprende representações vetoriais (\textit{embeddings}) de usuários e itens a partir do histórico de interações. O NCF combina duas abordagens: fatoração matricial generalizada (GMF), que captura interações lineares, e um perceptron multicamadas (MLP), que modela padrões não lineares complexos. Para usuários novos (\textit{cold start}), o sistema utiliza um modelo de \textit{Popularity Baseline} que recomenda conteúdos populares com decaimento temporal.
+    
+    \item Reordenação (\textit{Re-ranking}) -- Código: a lista é ajustada por regras de impulso contextuais: aumento de 30\% na pontuação para posts de autores seguidos pelo usuário, 20\% para posts da modalidade preferida, e 50\% quando amigos interagiram com o conteúdo. Estas regras são interpretáveis e ajustáveis sem necessidade de re-treinamento do modelo.
+\end{enumerate}
+Para facilitar a compreensão dos conceitos técnicos utilizados, a Tabela \ref{tab:glossario_ia} apresenta um glossário simplificado dos principais termos. Em seguida, a Tabela \ref{tab:ia_vs_codigo} sintetiza a distinção entre os componentes de IA e código no \textit{pipeline}.
+
+
+\begin{table}[htbp]
+\centering
+\caption{Glossário de termos técnicos utilizados no sistema de recomendação}
+\label{tab:glossario_ia}
+\begin{tabular}{|p{3.2cm}|p{5.5cm}|p{5.5cm}|}
+\hline
+\textbf{Termo} & \textbf{Definição Simplificada} & \textbf{Aplicação no FitConnect} \\
+\hline
+\textit{Retrieval} (Recuperação) & Processo de filtrar rapidamente itens para encontrar candidatos relevantes. & Filtro por código seleciona 2.000 posts por modalidade e frescor. \\
+\hline
+\textit{Scoring} (Pontuação) & Atribuição de nota de relevância para cada item candidato. & Modelo NCF (IA) avalia probabilidade do usuário gostar de cada post. \\
+\hline
+\textit{Re-ranking} (Reordenação) & Ajuste final da ordem considerando contexto. & Regras de impulso (+30\% seguido, +20\% modalidade) por código. \\
+\hline
+\textit{Embeddings} & Representação de usuários/itens como vetores numéricos. & NCF aprende vetores de 64 dimensões para cada usuário e post. \\
+\hline
+GMF (\textit{Generalized Matrix Factorization}) & Foca em relações diretas. Exemplo: "Se você curte musculação, vai gostar de posts de musculação." & Componente do NCF que captura padrões lineares e óbvios. \\
+\hline
+MLP (\textit{Multi-Layer Perceptron}) &Foca em relações complexas. Exemplo: "Quem treina de manhã e gosta de yoga, costuma curtir receitas fit." & Componente do NCF que aprende padrões profundos e não óbvios. \\
+\hline
+\textit{Popularity Baseline} & Estatística de Tendência. Não é uma rede neural treinada, mas um cálculo matemático do que está em alta no momento entre todos os usuários. & \textit{Fallback} para usuários novos (\textit{cold start}) até que eles tenham histórico próprio. \\
+\hline
+\textit{Cold Start} & Problema de recomendar para usuários novos sem histórico. & Situação onde o sistema ignora a personalização e usa a Popularidade. \\
+\hline
+\textit{Nudges} & Estímulos comportamentais sutis para motivar ação. & Regras de negócio geram notificações baseadas em dados de saúde. \\
+\hline
+\end{tabular}
+\end{table}
+
+
+\begin{table}[htbp]
+\centering
+\caption{Distinção entre componentes de IA e código no \textit{pipeline} de recomendação}
+\label{tab:ia_vs_codigo}
+\begin{tabular}{|l|l|l|p{5.5cm}|}
+\hline
+\textbf{Estágio} & \textbf{Tipo} & \textbf{Componente} & \textbf{Função} \\
+\hline
+Recuperação & Código & Filtro Simples & Filtra por modalidade, frescor e privacidade \\
+\hline
+Pontuação & IA Neural & NCF & Aprende preferências usuário-item via \textit{embeddings} \\
+\hline
+Pontuação & IA Estatística & Popularity & \textit{Fallback} para \textit{cold start} \\
+\hline
+Reordenação & Código & Boost Rules & Ajuste contextual (+30\% seguido, +20\% modalidade) \\
+\hline
+\end{tabular}
+\end{table}
+
+O diferencial da arquitetura do FitConnect é a integração de dados de atividade física à esse processo. O sistema processa sinais de dispositivos vestíveis (\textit{wearables}), como qualidade do sono, frequência cardíaca e intensidade de treinos recentes. Estes dados alimentam um sistema complementar de \textit{Smart Nudges}, que são notificações motivacionais. Elas operam por regras de negócio baseadas em fisiologia do exercício, sem uso de IA, garantindo interpretabilidade e controle sobre as recomendações de saúde.
+
+
+
+
+\subsection{Gamificação em Saúde Digital}
+
+Gamificação é definida como o uso de elementos de design de jogos em contextos não lúdicos para aumentar a motivação e o engajamento, incorporando mecânicas específicas como pontos, \textit{ranking}, barras de progresso e recompensas em aplicações existentes, sem necessariamente criar uma experiência de jogo completa. No contexto de saúde móvel, a gamificação tem sido aplicada como estratégia para promover mudanças comportamentais sustentáveis, aproveitando mecanismos psicológicos de recompensa e competição para incentivar a adoção e manutenção de hábitos saudáveis. 
+
+A eficácia de intervenções gamificadas fundamenta-se em sua capacidade de atender necessidades psicológicas básicas propostas pela Teoria da Autodeterminação, que identifica autonomia, competência e pertencimento como pilares da motivação intrínseca, forma de motivação mais robusta e duradoura quando comparada à motivação extrínseca dependente de recompensas externas \cite{10.2196/27794}.
+
+Evidências empíricas demonstram que intervenções gamificadas orientadas à comparação social podem promover melhorias significativas em atividade física e bem-estar. \citeonline{SANUDO2024102590} conduziram ensaio randomizado controlado com jovens adultos no qual elementos de gamificação como quadros de líderes e barras de progresso resultaram em aumentos mensuráveis em atividade física moderada, funcionamento físico e bem-estar emocional. 
+
+\citeonline{10.2196/27794} corroboraram esses achados em revisão sistemática de 50 estudos empíricos, identificando que intervenções guiadas por teorias comportamentais e que combinavam múltiplos elementos de jogo, apresentaram efetividade superior àquelas que utilizaram elementos isolados, reforçando a importância da integração entre gamificação e sinais fisiológicos capturados por dispositivos pessoais.
+
+No FitConnect, a estratégia de gamificação se materializa através de quadros de líderes, barras de progresso, trends compartilhados e sistema de recompensas sociais, aproveitando a comparação social como motivador para a prática regular de atividade física. 
+
+Essa camada é potencializada pelo sistema de recomendação multirrelacional, que personaliza a experiência gamificada ao sugerir metas adaptativas calibradas pelo histórico e contexto do usuário, compor \textit{ranking} segmentados por nível de condicionamento para evitar desmotivação por comparações desproporcionais, recomendar companhias de treino por afinidade de perfil e proximidade geográfica, e priorizar conquistas alinhadas aos objetivos individuais, integrando os fundamentos da filtragem colaborativa heterogênea com os mecanismos de engajamento da gamificação orientada à autodeterminação.
+
+
+\section{Trabalhos Correlatos}
+
+A gamificação em aplicativos tem revolucionado a experiência de uso e aumentado significativamente a adesão dos usuários. Nos ensaios de campo em \cite{Grech2024GamificationPA} mostram que combinações de pontos, \textit{badges} e \textit{ranking} produzem efeitos distintos sobre motivação e passos, exigindo testes e arranjos cuidadosos. Em \cite{Edney2020ActiveTeam}, um ensaio randomizado por clusters com app social gamificado indica ganhos quando o jogo é acoplado a reforço social estruturado como, \textit{feed}, grupos e desafios.
+
+Seguindo essa linha, \cite{Hirsch2014} utiliza registros geolocalizados para mapear uso de parques, rotas e desigualdades de acesso. Esses dados ajudam a planejar a oferta de locais e políticas de incentivo, para que os usuários se mantenham mais engajados com o aplicativo.
+
+No ecossistema de \textit{fitness} social, reportagens analíticas recentes detalham o crescimento do GymRats, destacando o papel de desafios em grupo, leaderboards e um feed de progresso para criar senso de pertencimento e constância nos treinos \cite{BoaForma2025GymRats}. O texto descreve viralização no Brasil a partir de 2024, mecânicas simples orientadas a metas e recompensas, alinhadas à literatura de gamificação que associa reforço social a aumento de adesão. 
+
+Já \cite{He2014RecFit} mostram que incorporar contexto (perfil, preferências, horário, local, clima, restrições) supera abordagens puramente colaborativas, sobretudo em esparsidade e início de uso, trazendo mais pertinência com menos fricção. Com isso, o usuário passa a receber recomendações personalizadas, que fazem sentido para sua rotina e contribuem diretamente para os resultados que deseja atingir.
+
+ No contexto de privacidade em redes de treino com localização, \cite{Hassan2018} analisam mecanismos de proteção por exemplo, zonas de privacidade e mostram que, mesmo com ocultações parciais, trajetos públicos ainda podem permitir a dedução de domicílios e rotinas quando iniciam/terminam em pontos recorrentes. Dessa forma, salvaguardas precisam combinar desenho técnico e escolhas do usuário. 
+
+ Em educação digital, há evidências de que rotas personalizadas baseadas em dados elevam eficiência, engajamento e retenção. Um estudo recente implementado em plataformas como o Duolingo mostra que trilhas adaptativas em tempo real melhoram resultados e mantêm usuários ativos por mais tempo \cite{Xia2024DuolingoPaths}. O artigo reforça que a recomendação, ao considerar histórico, desempenho e contexto, é componente central do engajamento contínuo.
+
+Semelhante às abordagens anteriores, o sistema proposto neste projeto se articula em diversas frentes, incluindo o uso da gamificação, pretendendo explorar microgrupos, \textit{leaderboards} de curto ciclo e resets periódicos, avaliando combinações que preservem alcançabilidade e evitem desmotivação. Também no contexto das recomendações, o sistema utiliza sinais de pessoa–atividade–evento–local para sugerir companhias e eventos compatíveis com o momento atual do usuário.
+
+Por fim, o FitConnect também se assemelha a essas abordagens ao orientar recomendações por proximidade que consideram a disponibilidade real dos espaços, sempre com análises agregadas e consentimento específico, nunca exibindo trajetos individuais e, no contexto de privacidade, adotando agregação espacial e temporal, visibilidade controlada por postagem e padrões conservadores por padrão.
+
+\section{Metodologia}
+
+Esta seção apresenta os materiais utilizados para o desenvolvimento do trabalho e a metodologia adotada, detalhando a arquitetura do sistema, o \textit{pipeline} de recomendação e os modelos de inteligência artificial implementados.
+
+
+\subsection{Materiais}
+
+O desenvolvimento do FitConnect emprega um conjunto de tecnologias e ferramentas selecionadas para atender aos requisitos de escalabilidade, privacidade e experiência do usuário. A arquitetura é distribuída em três camadas principais: \textit{frontend}, \textit{backend} e sistema de inteligência artificial.
+
+A camada de apresentação utiliza React Native Expo \cite{reactnative2024} com TypeScript \cite{typescript2024} para o aplicativo móvel, e Vite \cite{vite2024} com React para interface web administrativa. O \textit{backend} é implementado em C\# com .NET \cite{dotnet2024} e Entity Framework Core \cite{efcore2024}, seguindo os princípios de \textit{Domain-Driven Design} \cite{penchikala2008ddd}. O banco de dados SQL Server armazena informações de usuários, atividades, postagens e interações, com \textit{schema} projetado para suportar agregação espacial via células H3 e integração com dados de dispositivos vestíveis.
+O sistema de inteligência artificial, foco central desta implementação, é desenvolvido em Python 3.10, utilizando PyTorch 2.0 \cite{paszke2019pytorch} para implementação do modelo NCF (\textit{Neural Collaborative Filtering}), scikit-learn \cite{pedregosa2011scikit} para o modelo de \textit{Popularity Baseline}, e pandas para manipulação de dados. A arquitetura foi simplificada para utilizar apenas dois modelos de IA (NCF e Popularity), complementados por regras de código para filtragem e ajuste contextual, priorizando eficiência e interpretabilidade.
+
+A agregação espacial para preservação de privacidade emprega o sistema de indexação geoespacial H3 \cite{h3geo2024} desenvolvido pela Uber, que representa localizações como células hexagonais hierárquicas, permitindo controle preciso sobre o nível de granularidade exposto. A integração com dispositivos vestíveis (\textit{smartwatches} e pulseiras inteligentes) permite a extração automática de dados fisiológicos e de desempenho, incluindo frequência cardíaca em tempo real, gasto calórico estimado, contagem de passos, duração do exercício e qualidade do sono. Estes dados alimentam o sistema de \textit{Smart Nudges}, que opera por regras de negócio baseadas em ciência do esporte, e são utilizados na geração dos dados sintéticos de treinamento.
+
+
+A Figura \ref{fig:fluxo_integracao} detalha o fluxo de dados entre os componentes do sistema, desde a coleta inicial no aplicativo e dispositivos vestíveis até o processamento assíncrono pelos modelos de IA e o retorno das recomendações personalizadas.
+
+\begin{figure}[htbp]
+\centering
+\caption{Fluxo de integração e processamento de dados no ecossistema FitConnect.}
+
+\includegraphics[width=1\textwidth]{figuras/FluxogramaAppFuncionamento.drawio.png}
+\label{fig:fluxo_integracao}
+\small Fonte: Elaborado pelos autores.
+\end{figure}
+
+\subsection{Método}
+Esta subseção detalha a implementação do sistema, organizada em três partes: a arquitetura geral que integra as camadas de aplicação, o \textit{pipeline} de recomendação que combina dois modelos de IA (NCF e Popularity) com regras de código, e o sistema de \textit{Smart Nudges} que opera por regras de negócio. A distinção entre componentes de IA e código, apresentada na Tabela \ref{tab:ia_vs_codigo}, orienta toda a implementação.
+
+\subsubsection{Arquitetura Geral do Sistema}
+
+A arquitetura do sistema integra aplicativo móvel, \textit{backend} de serviços e sistema de inteligência artificial. O aplicativo móvel e interface web seguem padrão \textit{Model-View-Controller}, que é um padrão de arquitetura de projeto consolidado \cite{10.5555/186897}, enquanto o \textit{backend} implementa \textit{Domain-Driven Design} \cite{10.5555/861502} com camadas de domínio, aplicação e infraestrutura. O \textit{schema} do banco de dados armazena perfis de usuário com atributos como nível de condicionamento. Dentre esses perfis temos \textit{persona} e modalidades preferidas, atividades físicas vinculadas a sinais de \textit{wearables}, postagens com controles de visibilidade e interações que alimentam o sistema de recomendação. A agregação espacial é implementada através de células H3, permitindo que atividades e perfis referenciem localizações agregadas ao invés de coordenadas GPS precisas.
+
+A Figura \ref{fig:perfil_privacidade} ilustra o modelo de dados para perfil e privacidade, destacando como a tabela \texttt{UsuarioPerfil} armazena as características utilizadas pela IA, enquanto a tabela \texttt{CelulaLocalizacao} e o atributo \texttt{CelulaH3} garantem o desacoplamento da localização exata.
+
+\begin{figure}[htbp]
+\centering
+\caption{Modelo de dados para Perfil e Privacidade, evidenciando o uso de células H3 para anonimização de localização.}
+\includegraphics[width=0.7\textwidth]{figuras/diagramaFluxoPrivacidadePerfil.drawio.png}
+\label{fig:perfil_privacidade}
+\small Fonte: Elaborado pelos autores.
+\end{figure}
+
+
+A Tabela \ref{tab:campos_perfil_uso} detalha os campos essenciais do modelo de perfil e sua utilização nos componentes do sistema.
+
+\begin{table}[htbp]
+\centering
+\caption{Campos do modelo de perfil e sua utilização no sistema}
+\label{tab:campos_perfil_uso}
+\begin{tabular}{|l|l|l|p{5cm}|}
+\hline
+\textbf{Tabela} & \textbf{Campo} & \textbf{Componente} & \textbf{Utilização} \\
+\hline
+UsuarioPerfil & Persona & NCF (IA) & Define padrão comportamental para geração de dados de treinamento \\
+\hline
+UsuarioPerfil & ModalidadesPrimarias & Filtro (Código) & Prioriza posts da modalidade preferida na recuperação \\
+\hline
+UsuarioPerfil & ModalidadesPrimarias & Impulso (Código) & Aplica +20\% na pontuação de posts compatíveis \\
+\hline
+UsuarioPerfil & NivelCondicionamento & Nudges (Regras) & Ajusta intensidade sugerida nos alertas motivacionais \\
+\hline
+UsuarioPerfil & CelulaH3Casa & Eventos (Código) & Recomenda eventos na mesma região agregada \\
+\hline
+CelulaLocalizacao & CelulaH3 & Privacidade & Substitui coordenadas GPS por célula hexagonal (~460m) \\
+\hline
+\end{tabular}
+\end{table}
+
+O campo \texttt{CelulaH3Casa} merece destaque: em vez de armazenar a localização exata do usuário (latitude/longitude), o sistema converte as coordenadas para uma célula H3 de resolução 8, que representa uma área hexagonal de aproximadamente 460 metros de lado. Esta abordagem garante privacidade por design, permitindo funcionalidades de proximidade sem expor endereços reais.
+
+
+
+No FitConnect, \textit{Posts} agregam mídia, metadados de atividade e sinais de \textit{wearables}, formando um grafo multirrelacional que alimenta o sistema de recomendação. Cada post é enriquecido com tags de modalidade, localização agregada (H3) e visibilidade configurável, permitindo descoberta contextualizada e preservação de privacidade.
+
+\subsubsection{Pipeline de Recomendação}
+
+O sistema de recomendação constitui o núcleo da plataforma, implementando um \textit{pipeline} em três estágios que combina dois modelos de Inteligência Artificial com regras de código. 
+
+A base de dados para este processo é estruturada conforme a Figura \ref{fig:interacoes_recomendacao}, onde a tabela \texttt{Interacao} centraliza todos os sinais (curtidas, comentários, compartilhamentos) que alimentam o treinamento do modelo NCF. Já a tabela \texttt{UsuarioConexao} define as relações de conexão  (\textit{Follow}/\textit{Friend}) utilizadas nas regras de impulso.
+
+
+\begin{figure}[htbp]
+\centering
+\caption{Modelo de dados para Interações e Recomendação, mostrando a estrutura de captura de sinais sociais.}
+\includegraphics[width=1\textwidth]{figuras/diagramaInteracoesRecomendacao.drawio.png}
+\label{fig:interacoes_recomendacao}
+\small Fonte: Elaborado pelos autores.
+\end{figure}
+
+
+A Tabela \ref{tab:campos_interacoes_uso} detalha como cada campo do modelo de interações alimenta os componentes do sistema.
+
+\begin{table}[htbp]
+\centering
+\caption{Campos do modelo de interações e sua utilização no sistema}
+\label{tab:campos_interacoes_uso}
+\begin{tabular}{|l|l|l|p{5.5cm}|}
+\hline
+\textbf{Tabela} & \textbf{Campo} & \textbf{Componente} & \textbf{Utilização} \\
+\hline
+Interacao & TipoAcao & NCF (IA) & Ações \texttt{like}, \texttt{comment} e \texttt{share} geram labels positivos (1) para treinamento \\
+\hline
+Interacao & IdAlvo & NCF (IA) & Identifica o post-alvo para formar o par (user\_id, post\_id) no treinamento \\
+\hline
+Interacao & DataHora & NCF (IA) & Ordena interações temporalmente para split 80\% treino / 20\% teste \\
+\hline
+UsuarioConexao & IdUsuario1/2 & Boost (Código) & Aplica +30\% na pontuação de posts de autores seguidos \\
+\hline
+UsuarioConexao & TipoConexao & Boost (Código) & Diferencia \texttt{follow} (+30\%) de \texttt{friend} (+50\% se amigo interagiu) \\
+\hline
+\end{tabular}
+\end{table}
+
+Este modelo de dados é o coração do treinamento da IA: cada interação positiva (like, comment, share) capturada pela tabela \texttt{Interacao} torna-se um exemplo de treinamento para o NCF, permitindo que a rede neural aprenda as preferências implícitas de cada usuário. A tabela \texttt{UsuarioConexao}, por sua vez, não alimenta a IA diretamente, ela é consumida apenas pelas regras de impulso (código), que priorizam conteúdo de conexões sociais na etapa final de re-ranking.
+
+
+O fluxo completo do \textit{pipeline} é ilustrado na Figura \ref{fig:pipeline}, evidenciando a distinção entre componentes de IA (em destaque azul) e código (cinza), conforme classificado na Tabela \ref{tab:ia_vs_codigo}.
+
+
+\begin{figure}[htbp]
+\caption{\textit{Pipeline} de recomendação simplificado do FitConnect: componentes de IA em destaque azul, código em cinza}
+\centering
+\includegraphics[width=0.8\textwidth]{figuras/PipelineRecomendacao.drawio.png}
+\label{fig:pipeline}
+\small Fonte: Elaborado pelos autores.
+\end{figure}
+
+O funcionamento do \textit{pipeline} pode agora ser reinterpretado a partir das entidades do nosso banco de dados e dos modelos de IA envolvidos. Assim, retomamos as três etapas já apresentadas anteriormente, mas desta vez destacando como o fluxo se ancora diretamente nas tabelas do sistema (Figura~\ref{fig:interacoes_recomendacao}) e como cada estágio interage com os componentes inteligentes da arquitetura. A seguir, descrevemos novamente o pipeline sob essa perspectiva integrada.
+
+\begin{enumerate}
+    \item Filtro Simples (Código): O foco desta etapa é velocidade. De todos os 50.000 posts disponíveis na tabela \texttt{Postagem}, o sistema aplica regras simples: consulta o campo \texttt{ModalidadesPrimarias} da tabela \texttt{UsuarioPerfil} para selecionar posts compatíveis, filtra por frescor (últimos 14 dias usando o campo \texttt{DataHora}) e remove conteúdo do próprio usuário. Esta etapa reduz o universo para aproximadamente 2.000 candidatos em menos de 5 milissegundos, sem necessidade de modelo neural.
+    
+    \item NCF Scoring (IA Neural): Com um número gerenciável de candidatos, o modelo \textit{Neural Collaborative Filtering} analisa cada um deles. Conforme detalhado na Tabela \ref{tab:campos_interacoes_uso}, o NCF foi treinado usando os pares (\texttt{user\_id}, \texttt{post\_id}) extraídos da tabela \texttt{Interacao}, onde ações como \texttt{like}, \texttt{comment} e \texttt{share} geram exemplos positivos. Para usuários novos sem histórico (\textit{cold start}), o sistema automaticamente utiliza o modelo de \textit{Popularity Baseline}, que recomenda posts populares com decaimento temporal.
+
+    \item Regras de impulso (Código): A lista final é ajustada por regras interpretáveis que consomem dados da tabela \texttt{UsuarioConexao}. Conforme a Tabela \ref{tab:campos_interacoes_uso}, o sistema diferencia tipos de conexão: aumento de 30\% na pontuação para posts de autores com \texttt{TipoConexao = 'follow'} (incentivando descoberta através de conexões), 20\% para posts da modalidade preferida, e 50\% quando conexões do tipo \texttt{'friend'}. Estas regras são facilmente ajustáveis sem re-treinamento do modelo.
+\end{enumerate}
+
+A Tabela \ref{tab:fluxo_dados_pipeline} sintetiza o fluxo de dados entre entidades e componentes do \textit{pipeline}:
+
+\begin{table}[htbp]
+\centering
+\caption{Fluxo de dados entre entidades do banco e componentes do \textit{pipeline}}
+\label{tab:fluxo_dados_pipeline}
+\begin{tabular}{|l|l|l|p{4.5cm}|}
+\hline
+\textbf{Estágio} & \textbf{Entidade} & \textbf{Campo} & \textbf{Como é Usado} \\
+\hline
+Filtro (Código) & UsuarioPerfil & ModalidadesPrimarias & Filtra posts por modalidade \\
+\hline
+Filtro (Código) & Postagem & DataHora & Seleciona posts $<$ 14 dias \\
+\hline
+NCF (IA) & Interacao & TipoAcao & Label positivo se like/comment/share \\
+\hline
+NCF (IA) & Interacao & IdAlvo & Par (user\_id, post\_id) para treino \\
+\hline
+Boost (Código) & UsuarioConexao & TipoConexao & +30\% follow, +50\% friend \\
+\hline
+Popularity (IA) & Postagem & LikeCount & Ranking de popularidade \\
+\hline
+\end{tabular}
+\end{table}
+
+\subsubsection{Sistema de Smart Nudges (Regras de Negócio)}
+\label{sec:smart_nudges}
+
+Complementando o \textit{pipeline} de recomendação de conteúdo, o FitConnect implementa um sistema separado de \textit{Nudges} Inteligentes \cite{thaler2019nudge}. É importante destacar que este sistema não utiliza Inteligência Artificial, ele opera exclusivamente por regras de negócio baseadas em diretrizes médicas de reabilitação e esporte \cite{2006} e psicologia comportamental. Esta escolha de design garante interpretabilidade total, controle sobre recomendações de saúde e facilidade de ajuste.
+
+A Figura \ref{fig:wearables_nudges} detalha como os dados são coletados e processados: as tabelas referenciadas de  \texttt{UsuarioDadosDiarios} (sono, passos) e \texttt{AtividadeSinaisWearable} (intensidade do treino) servem de gatilho para a geração de registros na tabela \texttt{SmartNudge}.
+
+\begin{figure}[htbp]
+\centering
+\caption{Modelo de dados para Wearables e Smart Nudges, ilustrando o fluxo de dados fisiológicos para geração de notificações motivacionais.}
+\includegraphics[width=1\textwidth]{figuras/diagramaWerables.drawio.png}
+\label{fig:wearables_nudges}
+\small Fonte: Elaborado pelos autores.
+\end{figure}
+
+
+A Tabela \ref{tab:campos_nudges} detalha como cada campo do modelo de dados alimenta as regras de disparo dos \textit{nudges}.
+
+\begin{table}[H]
+\centering
+\caption{Campos do modelo de wearables e sua utilização nas regras de nudges}
+\label{tab:campos_nudges}
+\begin{tabular}{|l|l|l|p{5cm}|}
+\hline
+\textbf{Tabela} & \textbf{Campo} & \textbf{Nudge} & \textbf{Regra de Disparo} \\
+\hline
+UsuarioDadosDiarios & QualidadeSono & Recovery & Se sono $<$ ``bom'', sugere descanso \\
+\hline
+UsuarioDadosDiarios & PassosTotais & Streak & Se passos $<$ 70\% da média 7 dias \\
+\hline
+UsuarioDadosDiarios & FCRepouso & Recovery & Detecta fadiga acumulada \\
+\hline
+AtividadeSinaisWearable & FC\_Media & Challenge & Se 3+ dias com intensidade baixa \\
+\hline
+AtividadeSinaisWearable & ZonaDominante & Variety & Se 80\%+ na mesma zona/modalidade \\
+\hline
+SmartNudge & Urgencia & Priorização & Ordena notificações (1=baixa, 4=alta) \\
+\hline
+SmartNudge & Visualizado & Feedback & Rastreia efetividade das notificações \\
+\hline
+\end{tabular}
+\end{table}
+
+É fundamental destacar a diferença entre o \textit{pipeline} de recomendação e os \textit{Smart Nudges}: enquanto o primeiro utiliza IA neural (NCF) para aprender preferências implícitas a partir de interações históricas, os \textit{nudges} operam por regras explícitas baseadas em limiares fisiológicos. Esta distinção garante que recomendações de saúde, como sugerir descanso, sejam sempre interpretáveis e auditáveis, focando em transparência e bem estar do usuário.
+
+A Tabela \ref{tab:nudges_regras} apresenta os cinco tipos de \textit{nudges} implementados, suas condições de disparo e os fundamentos científicos de cada um.
+
+\begin{table}[H]
+\centering
+\caption{Regras de disparo dos Smart Nudges e dados utilizados}
+\label{tab:nudges_regras}
+\begin{tabular}{|l|p{4.5cm}|p{4cm}|l|}
+\hline
+\textbf{Nudge} & \textbf{Condição (Regra)} & \textbf{Dados Utilizados} & \textbf{Fundamento} \\
+\hline
+Recuperação & Sono ruim + FC $>$ 140 BPM ou 3+ dias intensos & sleep\_prev, hr\_mean, intensity & Supercompensação \\
+\hline
+Desafio & 3+ dias baixa intensidade + sono bom & intensity, sleep\_prev & Zona de conforto \\
+\hline
+Constância & Passos $<$ 70\% da média & steps, média 7 dias & Aversão à perda \\
+\hline
+Variedade & 80\%+ mesma modalidade & modality (últimos 10 dias) & Periodização \\
+\hline
+Momento Ideal & Horário de pico + sono bom & created\_at, sleep\_prev & Timing comportamental \\
+\hline
+\end{tabular}
+\end{table}
+
+O sistema monitora dados de dispositivos vestíveis para identificar cinco cenários principais:
+\begin{itemize}
+    \item [a)] Recuperação: Sugere descanso ou atividades leves quando detecta sono inadequado ou excesso de treino, baseando-se no princípio da supercompensação.
+    \item [b)] Desafio: Encoraja o aumento de intensidade quando identifica períodos de estagnação, visando evitar platôs de evolução.
+    \item [c)] Constância: Alerta sobre o risco de quebrar sequências de atividades, utilizando o gatilho comportamental de aversão à perda.
+    \item [d)] Variedade: Sugere novas modalidades quando nota repetição excessiva, prevenindo lesões por esforço repetitivo.
+    \item [e)] Momento Ideal: Identifica e aproveita os horários em que o usuário historicamente apresenta melhor desempenho.
+\end{itemize}
+
+\section{Experimentos e Resultados Preliminares}
+
+\subsection{Geração de Dados Sintéticos}
+
+Para validação inicial do sistema de recomendação, foram gerados dados sintéticos que simulam o comportamento real de uma rede social ativa. O processo de geração foi implementado em Python e segue uma metodologia baseada em templates pré-definidos com randomização controlada.
+
+\subsubsection{Metodologia de Geração}
+
+A geração de dados sintéticos utiliza dois conjuntos de templates:
+
+\begin{enumerate}
+    \item 8 Personas de Usuários: perfis comportamentais pré-definidos que determinam modalidades preferidas, horários típicos de treino, frequência semanal e propensão social. Cada usuário é associado a uma persona, e seus atributos são randomizados dentro dos limites definidos pelo template.
+    
+    \item 8 Perfis de Modalidade: especificações fisiológicas por tipo de atividade física, incluindo faixas realistas de frequência cardíaca, contagem de passos e distribuição de intensidade. Posts são gerados com sinais de \textit{wearables} randomizados dentro dessas faixas.
+\end{enumerate}
+
+Esses dois templates podem ser vistos na tabela \ref{tab:personas}.
+
+
+\begin{figure}[H]
+\centering
+\caption{Fluxo de geração de dados sintéticos: templates pré-definidos são combinados com randomização controlada para gerar dados de treinamento}
+\label{fig:fluxo_geracao}
+\includegraphics[width=0.95\textwidth]{figuras/diagramaFluxoDadosSintetico.drawio.png}
+\small Fonte: Elaborado pelos autores.
+\end{figure}
+
+Esta abordagem garante que os dados contenham padrões aprendíveis pelo modelo NCF. Os usuários de uma mesma persona tendem a interagir com posts de modalidades similares, criando correlações que a rede neural pode identificar e generalizar.
+
+
+\subsubsection{Sistema de Personas}
+
+O elemento central da geração é o sistema de \textit{personas}, que define perfis comportamentais consistentes para os usuários. Em vez de gerar dados totalmente aleatórios, que não conteriam padrões, cada usuário é associado a uma \textit{persona} que determina suas preferências de modalidade, horários de treino, frequência semanal e propensão a interagir socialmente. Este design é fundamentado em estudos populacionais sobre padrões de atividade física, como o fenômeno dos praticantes de fim de semana \cite{santos2022weekend} e variações de desempenho por cronotipo \cite{facer2018chronotype}.
+
+A Tabela \ref{tab:personas} apresenta as oito \textit{personas} implementadas e suas características:
+
+\begin{table}[htbp]
+\centering
+\caption{Personas de usuários e suas características comportamentais}
+\label{tab:personas}
+\begin{tabular}{|l|l|l|l|r|}
+\hline
+\textbf{Persona} & \textbf{Modalidades} & \textbf{Horários} & \textbf{Nível}  \\
+\hline
+Corredor Matinal & Corrida, Caminhada & 6-7h & Intermediário \\
+Musculador Noturno & Musculação, HIIT & 18-20h & Avançado \\
+Yogi Relaxado & Yoga, Caminhada & 7-8h, 19h & Intermediário \\
+Crossfitter Intenso & Crossfit, Corrida & 6h, 18h & Avançado\\
+Ciclista Weekend & Bike, Corrida & 7-8h, 17h & Intermediário \\
+Nadador Regular & Natação, Corrida & 6h, 12h, 18h & Intermediário  \\
+Iniciante Explorando & Caminhada, Yoga, Bike & 8-9h, 19h & Iniciante \\
+Atleta Veterano & Corrida, Musculação, Natação & 6-7h, 17h & Avançado \\
+\hline
+\end{tabular}
+\end{table}
+
+\subsubsection{Regras de Afinidade nas Interações}
+
+O aspecto mais importante para o treinamento do modelo NCF é a regra de afinidade nas interações. 80\% das interações (curtidas, comentários) são geradas entre usuários e posts da mesma modalidade. Por exemplo, um usuário com \textit{persona} ``Corredor Matinal'' tem 80\% de probabilidade de interagir com posts de corrida ou caminhada. Os 20\% restantes são interações aleatórias, simulando descoberta de novos interesses.
+
+O modelo NCF consegue identificar que usuários que curtem posts de corrida tendem a curtir outros posts de corrida, e generaliza este padrão para fazer recomendações.
+
+\subsubsection{Sinais de Wearables Realistas}
+
+Cada post gerado contém sinais de \textit{wearables} calibrados por modalidade, conforme a Tabela \ref{tab:wearables_modalidade}:
+
+\begin{table}[htbp]
+\centering
+\caption{Parâmetros de \textit{wearables} por modalidade (faixas realistas)}
+\label{tab:wearables_modalidade}
+\begin{tabular}{|l|c|c|l|}
+\hline
+\textbf{Modalidade} & \textbf{FC Média (BPM)} & \textbf{Passos} & \textbf{Intensidade Predominante} \\
+\hline
+Corrida & 140-165 & 8.000-15.000 & Moderada (50\%) \\
+Musculação & 110-140 & 2.000-5.000 & Alta (50\%) \\
+HIIT & 160-185 & 3.000-8.000 & Alta (70\%) \\
+Yoga & 85-110 & 500-2.000 & Baixa (70\%) \\
+Natação & 120-150 & 0-500 & Moderada (60\%) \\
+Crossfit & 155-180 & 4.000-10.000 & Alta (65\%) \\
+\hline
+\end{tabular}
+\end{table}
+
+Estes sinais são utilizados pelo sistema de \textit{Smart Nudges} para gerar notificações motivacionais contextualizadas.
+
+\subsubsection{Estrutura dos Dados Gerados}
+
+A Tabela \ref{tab:dataset} apresenta as estatísticas gerais do \textit{dataset} sintético. O conjunto totaliza 10.000 usuários distribuídos em 8 \textit{personas}, 50.000 posts com sinais de \textit{wearables} calibrados por modalidade, e 100.000 interações com regra de 80\% de afinidade.
+
+\begin{table}[H]
+\centering
+\caption{Estatísticas do dataset sintético gerado}
+\label{tab:dataset}
+\begin{tabular}{lrp{6cm}}
+\hline
+\textbf{Componente} & \textbf{Quantidade} & \textbf{Características} \\
+\hline
+Usuários & 10.000 & Distribuídos em 8 personas com preferências consistentes \\
+\textit{Posts} & 50.000 & Sinais de \textit{wearables} calibrados por modalidade \\
+Eventos & 5.000 & Treinos em grupo organizados por comunidade \\
+Interações & 100.000 & 80\% com afinidade de modalidade (padrão aprendível) \\
+\hline
+\end{tabular}
+\end{table}
+
+\subsubsection{Associação entre Dados e Modelos}
+
+A Tabela \ref{tab:dados_modelos} explicita quais dados são utilizados por cada componente do sistema, distinguindo claramente o que alimenta a IA (NCF) e o que alimenta as regras de código (Filtro, Impulsos, Nudges). Note que o \textit{pipeline} de recomendação e o sistema de Smart Nudges operam sobre conjuntos de dados distintos, conforme discutido na Seção \ref{sec:smart_nudges}.
+
+\begin{table}[htbp]
+\centering
+\caption{Associação entre dados gerados e componentes do sistema}
+\label{tab:dados_modelos}
+\begin{tabular}{|l|l|c|c|c|c|}
+\hline
+\textbf{Fonte} & \textbf{Dado} & \textbf{NCF (IA)} & \textbf{Filtro} & \textbf{Impulso} & \textbf{Nudges} \\
+\hline
+Interação & user\_id + post\_id & $\checkmark$ & -- & -- & -- \\
+Interação & action (like/comment) & $\checkmark$ & -- & -- & -- \\
+Interação & timestamp & $\checkmark$ & -- & -- & -- \\
+\hline
+Post & modality & -- & $\checkmark$ & $\checkmark$ & -- \\
+Post & created\_at & -- & $\checkmark$ & -- & -- \\
+Post & author\_id & -- & -- & $\checkmark$ & -- \\
+\hline
+Conexão & follows/friends & -- & -- & $\checkmark$ & -- \\
+\hline
+Wearable & hr\_mean (FC média) & -- & -- & -- & $\checkmark$ \\
+Wearable & steps (passos) & -- & -- & -- & $\checkmark$ \\
+Wearable & intensity & -- & -- & -- & $\checkmark$ \\
+Wearable & sleep\_prev (sono) & -- & -- & -- & $\checkmark$ \\
+\hline
+\end{tabular}
+\end{table}
+
+Observa-se que o modelo NCF utiliza exclusivamente dados de interações, enquanto os Smart Nudges utilizam exclusivamente dados de \textit{wearables}. Esta separação reforça a distinção arquitetural, o NCF aprende preferências de conteúdo, enquanto os Nudges avaliam estado físico e comportamental do usuário.
+
+\subsection{Processo de Treinamento}
+Os modelos foram treinados utilizando divisão temporal: 80\% das interações mais antigas são usadas para aprendizado, e 20\% das mais recentes são reservadas para teste.
+
+\subsubsection{Previsão de Interações Futuras}
+
+O objetivo do modelo NCF não é prever literalmente o futuro, mas sim estimar a probabilidade de um usuário gostar de um post que ainda não viu. Durante o treinamento, o modelo aprende padrões de preferência a partir do histórico de interações passadas. Durante o uso real, ele aplica esses padrões para ordenar posts novos por relevância.
+
+A previsão funciona assim:
+\begin{enumerate}
+    \item Aprendizado (passado): O modelo observa que o usuário X curtiu posts de corrida e não curtiu posts de yoga.
+    \item Generalização: O modelo aprende que usuários com perfil similar a X tendem a preferir posts de corrida.
+    \item Recomendação (presente): Quando um novo post de corrida é publicado, o modelo atribui alta probabilidade de X gostar dele, mesmo sem X ter visto esse post antes.
+\end{enumerate}
+
+A divisão temporal avalia a capacidade do modelo de aprender padrões consistentes no comportamento do usuário. Por exemplo: suponha que, entre janeiro e março, um usuário tenha demonstrado preferência por treinos de força. Em abril, ao curtir um novo post desse tipo, o modelo não antecipou o futuro, mas utilizou exclusivamente dados do período anterior para identificar que aquele conteúdo é compatível com o perfil aprendido.
+
+
+\subsubsection{Interpretação da Redução de Loss}
+
+Em modelos de IA, o loss (ou erro) é uma medida numérica que indica o quanto as previsões do modelo estão se afastando da realidade. Quanto maior o loss, pior o modelo está acertando, quanto menor, mais próximo ele está do comportamento verdadeiro dos usuários. Assim, o treinamento nada mais é do que um processo iterativo em que a rede neural ajusta seus parâmetros para reduzir esse erro.
+
+Com essa definição em mente, o valor inicial de \textit{loss} = 0,6932 não é arbitrário: ele corresponde exatamente ao erro produzido por um modelo que atribui 69\% de probabilidade para todas as previsões. Esse é o ponto de partida típico de uma rede neural não treinada.
+
+
+\begin{table}[H]
+\centering
+\caption{Resultados de treinamento dos modelos de IA}
+\label{tab:training_results}
+\begin{tabular}{lccccc}
+\hline
+\textbf{Modelo} & \textbf{Tipo} & \textbf{Épocas} & \textbf{Loss Inicial} & \textbf{Loss Final} & \textbf{Redução} \\
+\hline
+NCF & IA Neural & 5 & 0,6932 & 0,0236 & 96,6\% \\
+Popularity & Baseline & -- & -- & -- & -- \\
+\hline
+\end{tabular}
+\end{table}
+
+
+O campo épocas representa quantas vezes o modelo neural percorreu todo o conjunto de dados durante o processo de aprendizado. Cada época corresponde a um periodo de treinamento que melhora o seu entendimento dos dados. No caso do NCF, o treinamento foi executado por 5 épocas, refinando progressivamente suas previsões até atingir o \textit{loss} final de 0,0236 (2\%).
+
+Já o modelo Popularity, embora também seja considerado uma forma de IA, não realiza treinamento durante o nosso pipeline. Ele atua como um modelo baseline pré-treinado, baseado em estatísticas agregadas do sistema. Como não passa por otimização iterativa nem ajuste de pesos, não há valores de loss ou épocas associados a ele. Sua função é servir como referência e atender o caso de cold start, quando o usuário ainda não possui interações suficientes para o modelo neural aprender padrões personalizados.
+
+\begin{itemize}
+    \item Antes do treinamento: O modelo diria ``50\% de chance do usuário curtir este post'' para qualquer post.
+    \item Após o treinamento: O modelo consegue distinguir ``98\% de chance de curtir este post de corrida'' vs ``2\% de chance de curtir este post de yoga'' para um usuário ``Corredor Matinal''.
+\end{itemize}
+
+A redução de 96,6\% é relevante porque demonstra que o modelo aprendeu os padrões de afinidade inseridos nos dados sintéticos. Se o modelo não tivesse aprendido nada, o \textit{loss} permaneceria próximo de 0,69.
+
+
+\subsection{Análise dos Resultados}
+
+Os resultados de treinamento demonstram que a arquitetura simplificada é eficaz para o problema de recomendação proposto.
+
+O modelo NCF (\textit{Neural Collaborative Filtering}) apresentou convergência rápida, indicando que os padrões de preferência foram efetivamente capturados.
+
+\subsubsection{Validação dos Smart Nudges}
+
+Os testes do sistema de \textit{Smart Nudges} confirmaram a capacidade das regras de negócio de identificar corretamente os cenários de saúde. Por exemplo, ao simular um usuário com sono classificado como ruim e treino intenso no dia anterior, o sistema gerou corretamente um alerta de ``Recuperação'', sugerindo atividades leves em vez de mais treino intenso.
+
+\begin{table}[htbp]
+\centering
+\caption{Validação dos Smart Nudges: cenários de teste}
+\label{tab:nudges_validacao}
+\begin{tabular}{|l|l|l|}
+\hline
+\textbf{Cenário} & \textbf{Dados de Entrada} & \textbf{Nudge Gerado} \\
+\hline
+Overtraining & sleep=poor, hr=170, 3 dias intensos & Recuperação (correto) \\
+Estagnação & 5 dias intensity=low, sleep=good & Desafio (correto) \\
+Monotonia & 8 posts de corrida seguidos & Variedade (correto) \\
+Horário ideal & 7h da manhã, sono=excellent & Momento Ideal (correto) \\
+\hline
+\end{tabular}
+\end{table}
+
+Esses resultados validam que a arquitetura híbrida, IA para recomendação de conteúdo mais regras para recomendação de saúde, é funcional e atende aos objetivos do projeto.
+
+
+\section{Cronograma}
+
+O desenvolvimento do FitConnect está planejado para ocorrer ao longo de cinco meses, iniciando em fevereiro e encerrando em junho de 2026. O cronograma foi estruturado em cinco fases sequenciais e incrementais, permitindo a construção progressiva da plataforma, desde a infraestrutura básica até as funcionalidades de inteligência artificial e integração final.
+
+A Figura \ref{fig:gantt} apresenta o diagrama de Gantt com a distribuição temporal das atividades. As fases de desenvolvimento, identificadas no cronograma como F1 a F5, são detalhadas a seguir:
+
+\begin{itemize}
+    \item F1 - Fundação (Fevereiro): Configuração inicial do ambiente de desenvolvimento, criação do esquema do banco de dados e implementação dos serviços básicos de autenticação (\textit{login}, registro) e gestão de perfis de usuário. No aplicativo móvel, serão desenvolvidas as interfaces base e a navegação.
+    
+    \item F2 - Core (Março): Desenvolvimento das funcionalidades centrais do sistema, incluindo o registro de atividades físicas, integração com mapas e a lógica de geolocalização com células H3 para privacidade. Paralelamente, será realizado o treinamento inicial dos modelos de IA com dados sintéticos.
+    
+    \item F3 - Social e Nudges (Abril): Implementação das camadas sociais, como o \textit{feed} de postagens e interações (curtidas, comentários). Na frente de inteligência artificial, serão desenvolvidas a API de recomendação e o motor de \textit{Smart Nudges}.
+    
+    \item F4 - Integração e Gamificação (Maio): Integração completa entre o \textit{backend} e os serviços de IA, permitindo que o aplicativo exiba recomendações personalizadas e alertas motivacionais. Implementação dos elementos de gamificação, como conquistas e sequências.
+    
+    \item F5 - Finalização (Junho): Período dedicado a testes intensivos, correção de erros (\textit{bugfix}), polimento da interface e escrita final da monografia.
+\end{itemize}
+
+\begin{figure}[htbp]
+\centering
+\caption{Cronograma de desenvolvimento do projeto dividido em fases.}
+\includegraphics[width=1\textwidth]{figuras/gantt_fitconnect_2026.png}
+\label{fig:gantt}
+\small Fonte: Elaborado pelos autores.
+\end{figure}
+
+% \section{Conclusão}
+
+% \textcolor{red}{Conclusão entra só no TCC2. Pode deixar aqui comentado}
+
+% A implementação do FitConnect surgiu da necessidade de tornar a prática de atividade física mais prática, interativa, inteligente e segura. Foram desenvolvidas, para isso, diferentes tecnologias: um aplicativo para dispositivos móveis com possibilidade de integração a uma pulseira vestível, uma interface web para acompanhamento do progresso e um sistema de recomendação de atividades baseado em Inteligência Artificial (IA). 
+
+% O sistema considera múltiplas características e preferências de cada usuário para construir um perfil detalhado e, a partir dele, gerar um feed personalizado. Entram nesse processo, por exemplo, os tipos de atividades e esportes que a pessoa gosta de praticar, sua idade, peso, nível de condicionamento físico, disponibilidade na rotina e localização geográfica. Com base nesses dados, o FitConnect consegue sugerir conteúdos, treinos e desafios mais alinhados ao perfil individual, aumentando tanto o engajamento quanto a aderência às práticas recomendadas.
+
+% (Nesse paragrafo falar um pouco das limitações que encontramos no projeto)
+
+% (Nesse paragrafo falar dos resultados obtidos nos testes com a IA)
+
+% Entretanto, ainda que o FitConnect seja um aliado muito importante na rotina de cada usuário, o acompanhamento com profissionais da área, como nutricionistas e professores de educação física, continua sendo essencial. A atuação desses especialistas garante maior precisão nas orientações, segurança na realização das atividades e melhores resultados em relação aos objetivos individuais, promovendo uma integração equilibrada entre tecnologia e cuidado humano.
+\newpage
+
+\bibliographystyle{abntex2-alf}
+\bibliography{bibliografia}
+
+\end{document}

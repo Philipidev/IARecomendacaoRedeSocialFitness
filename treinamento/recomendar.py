@@ -1,335 +1,47 @@
 """
 Módulo de recomendação de posts fitness.
 
-Carrega os artefatos treinados e expõe a função principal:
-
-    recomendar(
-        tags,
-        timestamp,
-        top_k=10,
-        excluir_tags_exatas=True,
-        peso_popularidade=0.10,
-        user_id=None,
-    ) -> pd.DataFrame
-
-O score de relevância combina cinco sinais no modo padrão e cinco no modo
-personalizado (`user_id` informado com perfil disponível):
-  - Similaridade de conteúdo: coseno entre o vetor de tags de entrada e cada post
-  - Co-ocorrência de tags: boost para posts que contêm tags relacionadas às de entrada
-  - Recência relativa: decaimento exponencial pela distância temporal em dias
-  - Influência social: soma dos graus dos usuários que interagiram com o post
-  - Quinto sinal:
-      * Popularidade (modo padrão): volume histórico de interações nas tags do post
-      * Afinidade usuário-item (modo personalizado): interesses explícitos, interações recentes e vizinhos
-
-Entradas:
-    tags      : List[str]  — nomes das tags (valores, não IDs)
-    timestamp : int        — timestamp em milissegundos do post de referência
-    top_k     : int        — número de recomendações
-    user_id   : int|None   — usuário alvo para personalização (opcional)
-
-Saída:
-    DataFrame com colunas:
-        message_type, creation_date_iso, tags_fitness,
-        content_length, language, relevance_score
-
-Uso como script (CLI):
-    python treinamento/recomendar.py --tags "Born_to_Run,Superunknown" --timestamp 1320000000000
-    python treinamento/recomendar.py --tags "Running_Free" --timestamp 1300000000000 --top-k 5 --user-id 123
+Expõe a função principal `recomendar()` e o carregamento plugável de rankers por
+`model_dir`, suportando tanto o baseline híbrido quanto o ranker LTR.
 """
 
 from __future__ import annotations
 
 import argparse
-import ast
-import json
-import math
-import pickle
 from pathlib import Path
+import sys
 
-import numpy as np
 import pandas as pd
-from sklearn.metrics.pairwise import cosine_similarity
 
 ROOT = Path(__file__).resolve().parent.parent
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+
+from treinamento.model_utils import DEFAULT_MODEL_DIR, resolve_model_dir
+from treinamento.rankers import (
+    PESO_POPULARIDADE,
+    WeightedHybridRanker,
+    load_ranker,
+)
+
 DADOS_DIR = ROOT / "treinamento" / "dados"
-MODELO_DIR = ROOT / "treinamento" / "modelo"
+MODELO_DIR = DEFAULT_MODEL_DIR
 PESOS_OTIMOS_PATH = MODELO_DIR / "pesos_otimos.json"
 
-# Pesos padrão/fallback do score base (quatro sinais)
-PESO_COSINE_PADRAO = 0.40
-PESO_COOC_PADRAO = 0.25
-PESO_TIME_PADRAO = 0.15
-PESO_SOCIAL_PADRAO = 0.20
-PESO_POPULARIDADE = 0.10
 
-# Pesos do score personalizado
-PESO_COSINE_PERSONALIZADO = 0.30
-PESO_COOC_PERSONALIZADO = 0.20
-PESO_TIME_PERSONALIZADO = 0.15
-PESO_SOCIAL_PERSONALIZADO = 0.15
-PESO_USER_AFFINITY = 0.20
-
-# Lambda do decaimento temporal (por dia)
-LAMBDA_DECAY = 0.01
-MS_POR_DIA = 86_400_000
+class ModeloRecomendacao(WeightedHybridRanker):
+    """Façade compatível com o baseline híbrido legado."""
 
 
-def _carregar_pesos_otimos() -> tuple[float, float, float, float]:
-    """Carrega pesos otimizados quando disponíveis; caso contrário usa padrão."""
-    default = (PESO_COSINE_PADRAO, PESO_COOC_PADRAO, PESO_TIME_PADRAO, PESO_SOCIAL_PADRAO)
-
-    if not PESOS_OTIMOS_PATH.exists():
-        return default
-
-    try:
-        with open(PESOS_OTIMOS_PATH, "r", encoding="utf-8") as f:
-            payload = json.load(f)
-
-        pesos = (
-            float(payload["w_cos"]),
-            float(payload["w_cooc"]),
-            float(payload["w_time"]),
-            float(payload["w_social"]),
-        )
-
-        if any(w < 0 for w in pesos):
-            return default
-        if not math.isclose(sum(pesos), 1.0, rel_tol=0, abs_tol=1e-6):
-            return default
-        return pesos
-    except Exception:
-        return default
+_modelos_cache: dict[str, object] = {}
 
 
-PESO_COSINE_BASE, PESO_COOC_BASE, PESO_TIME_BASE, PESO_SOCIAL_BASE = _carregar_pesos_otimos()
-
-
-def _parse_tags(value) -> list[str]:
-    import numpy as np
-
-    if isinstance(value, (list, np.ndarray)):
-        return [str(t) for t in value]
-    if isinstance(value, str):
-        try:
-            parsed = ast.literal_eval(value)
-            return [str(t) for t in parsed] if isinstance(parsed, list) else [value]
-        except Exception:
-            return [value]
-    return []
-
-
-class ModeloRecomendacao:
-    """Carrega os artefatos e mantém o estado do modelo em memória."""
-
-    def __init__(self) -> None:
-        self._vectorizer = None
-        self._post_matrix: np.ndarray | None = None
-        self._cooccurrence_map: dict | None = None
-        self._popularidade: np.ndarray | None = None
-        self._social_scores: np.ndarray | None = None
-        self._posts: pd.DataFrame | None = None
-        self._user_tag_profile: pd.DataFrame | None = None
-
-    def carregar(self) -> "ModeloRecomendacao":
-        """Carrega todos os artefatos do modelo e os posts de referência."""
-        for artefato in ["vectorizer.pkl", "post_matrix.npy", "tag_cooccurrence_map.pkl", "popularidade.npy"]:
-            caminho = MODELO_DIR / artefato
-            if not caminho.exists():
-                raise FileNotFoundError(
-                    f"Artefato '{artefato}' não encontrado em {MODELO_DIR}.\n"
-                    "Execute primeiro:\n"
-                    "  python treinamento/treinar.py"
-                )
-
-        with open(MODELO_DIR / "vectorizer.pkl", "rb") as f:
-            self._vectorizer = pickle.load(f)
-
-        self._post_matrix = np.load(MODELO_DIR / "post_matrix.npy")
-        self._popularidade = np.load(MODELO_DIR / "popularidade.npy")
-
-        with open(MODELO_DIR / "tag_cooccurrence_map.pkl", "rb") as f:
-            self._cooccurrence_map = pickle.load(f)
-
-        social_path = MODELO_DIR / "social_scores.npy"
-        self._social_scores = np.load(social_path) if social_path.exists() else None
-
-        profile_path = DADOS_DIR / "user_tag_profile.parquet"
-        self._user_tag_profile = pd.read_parquet(profile_path) if profile_path.exists() else None
-
-        cache_path = MODELO_DIR / "posts_cache.parquet"
-        fallback_path = DADOS_DIR / "posts_metadata.parquet"
-
-        if cache_path.exists():
-            posts_path = cache_path
-        elif fallback_path.exists():
-            posts_path = fallback_path
-        else:
-            raise FileNotFoundError(
-                f"Nenhum arquivo de posts encontrado em {MODELO_DIR} nem em {DADOS_DIR}.\n"
-                "Execute primeiro:\n"
-                "  python treinamento/preparacao_dados.py\n"
-                "  python treinamento/treinar.py"
-            )
-
-        self._posts = pd.read_parquet(posts_path)
-        self._posts["tags_fitness"] = self._posts["tags_fitness"].apply(_parse_tags)
-        return self
-
-    def _score_cosine(self, tags_entrada: list[str]) -> np.ndarray:
-        vetor_entrada = self._vectorizer.transform([tags_entrada]).astype(np.float32)
-        if vetor_entrada.sum() == 0:
-            return np.zeros(len(self._posts), dtype=np.float32)
-        return cosine_similarity(vetor_entrada, self._post_matrix).flatten().astype(np.float32)
-
-    def _score_cooccurrence(self, tags_entrada: list[str]) -> np.ndarray:
-        tags_conhecidas = set(self._vectorizer.classes_)
-        boost_por_tag: dict[str, float] = {}
-
-        for tag in tags_entrada:
-            for tag_viz, peso in self._cooccurrence_map.get(tag, []):
-                if tag_viz in tags_conhecidas:
-                    boost_por_tag[tag_viz] = boost_por_tag.get(tag_viz, 0.0) + peso
-
-        if not boost_por_tag:
-            return np.zeros(len(self._posts), dtype=np.float32)
-
-        scores = np.zeros(len(self._posts), dtype=np.float32)
-        for i, tags_post in enumerate(self._posts["tags_fitness"]):
-            for tag_post in tags_post:
-                scores[i] += boost_por_tag.get(tag_post, 0.0)
-
-        max_score = scores.max()
-        if max_score > 0:
-            scores /= max_score
-        return scores
-
-    def _score_social(self) -> np.ndarray:
-        if self._social_scores is not None and len(self._social_scores) == len(self._posts):
-            return self._social_scores
-        return np.zeros(len(self._posts), dtype=np.float32)
-
-    def _score_popularidade(self) -> np.ndarray:
-        """
-        Retorna o vetor de popularidade pré-computado (normalizado em [0,1]).
-        Se o artefato não foi carregado, retorna zeros.
-        """
-        if self._popularidade is not None and len(self._popularidade) == len(self._posts):
-            return self._popularidade
-        return np.zeros(len(self._posts), dtype=np.float32)
-
-    def _score_time_decay(self, timestamp_entrada: int) -> np.ndarray:
-        timestamps_posts = self._posts["creation_date"].values.astype(np.float64)
-        delta_dias = np.abs(timestamps_posts - float(timestamp_entrada)) / MS_POR_DIA
-        return np.exp(-LAMBDA_DECAY * delta_dias).astype(np.float32)
-
-    def _score_user_affinity(self, user_id: int | None) -> np.ndarray:
-        if user_id is None or self._user_tag_profile is None or self._user_tag_profile.empty:
-            return np.zeros(len(self._posts), dtype=np.float32)
-
-        perfil_user = self._user_tag_profile[self._user_tag_profile["user_id"] == int(user_id)]
-        if perfil_user.empty:
-            return np.zeros(len(self._posts), dtype=np.float32)
-
-        tag_score = dict(zip(perfil_user["tag_name"], perfil_user["user_tag_affinity"]))
-        scores = np.zeros(len(self._posts), dtype=np.float32)
-
-        for i, tags_post in enumerate(self._posts["tags_fitness"]):
-            if not tags_post:
-                continue
-            total = sum(float(tag_score.get(tag, 0.0)) for tag in tags_post)
-            scores[i] = total / len(tags_post)
-
-        max_score = scores.max()
-        if max_score > 0:
-            scores /= max_score
-        return scores
-
-    def _tem_perfil_usuario(self, user_id: int | None) -> bool:
-        if user_id is None or self._user_tag_profile is None or self._user_tag_profile.empty:
-            return False
-        return bool((self._user_tag_profile["user_id"] == int(user_id)).any())
-
-    def recomendar(
-        self,
-        tags: list[str],
-        timestamp: int,
-        top_k: int = 10,
-        excluir_tags_exatas: bool = True,
-        peso_popularidade: float = PESO_POPULARIDADE,
-        user_id: int | None = None,
-    ) -> pd.DataFrame:
-        if self._posts is None:
-            raise RuntimeError("Modelo não carregado. Chame .carregar() primeiro.")
-
-        tags_norm = [t.strip() for t in tags if t.strip()]
-        if not tags_norm:
-            raise ValueError("Lista de tags não pode ser vazia.")
-        if peso_popularidade < 0:
-            raise ValueError("peso_popularidade deve ser maior ou igual a zero.")
-
-        sc = self._score_cosine(tags_norm)
-        si = self._score_cooccurrence(tags_norm)
-        st = self._score_time_decay(timestamp)
-        ss = self._score_social()
-        usar_personalizacao = self._tem_perfil_usuario(user_id)
-
-        if usar_personalizacao:
-            su = self._score_user_affinity(user_id)
-            score_final = (
-                PESO_COSINE_PERSONALIZADO * sc
-                + PESO_COOC_PERSONALIZADO * si
-                + PESO_TIME_PERSONALIZADO * st
-                + PESO_SOCIAL_PERSONALIZADO * ss
-                + PESO_USER_AFFINITY * su
-            )
-        else:
-            sp = self._score_popularidade()
-            peso_total = (
-                PESO_COSINE_BASE
-                + PESO_COOC_BASE
-                + PESO_TIME_BASE
-                + PESO_SOCIAL_BASE
-                + peso_popularidade
-            )
-            score_final = (
-                PESO_COSINE_BASE * sc
-                + PESO_COOC_BASE * si
-                + PESO_TIME_BASE * st
-                + PESO_SOCIAL_BASE * ss
-                + peso_popularidade * sp
-            ) / peso_total
-
-        score_final = np.clip(score_final, 0.0, 1.0).astype(np.float32)
-
-        resultado = self._posts.copy()
-        resultado["relevance_score"] = score_final.round(4)
-
-        if excluir_tags_exatas:
-            tags_set = set(tags_norm)
-            resultado = resultado[resultado["tags_fitness"].apply(lambda t: set(t) != tags_set)]
-
-        resultado = resultado.sort_values("relevance_score", ascending=False).head(top_k)
-
-        colunas_saida = [
-            "message_type",
-            "creation_date_iso",
-            "tags_fitness",
-            "content_length",
-            "language",
-            "relevance_score",
-        ]
-        return resultado[[c for c in colunas_saida if c in resultado.columns]].reset_index(drop=True)
-
-
-_modelo: ModeloRecomendacao | None = None
-
-
-def _get_modelo() -> ModeloRecomendacao:
-    global _modelo
-    if _modelo is None:
-        _modelo = ModeloRecomendacao().carregar()
-    return _modelo
+def _get_modelo(model_dir: str | Path | None = None):
+    resolved = resolve_model_dir(model_dir)
+    key = str(resolved.resolve())
+    if key not in _modelos_cache:
+        _modelos_cache[key] = load_ranker(resolved)
+    return _modelos_cache[key]
 
 
 def recomendar(
@@ -339,36 +51,15 @@ def recomendar(
     excluir_tags_exatas: bool = True,
     peso_popularidade: float = PESO_POPULARIDADE,
     user_id: int | None = None,
+    model_dir: str | Path | None = None,
 ) -> pd.DataFrame:
-    """
-    Função de alto nível para recomendação de posts fitness.
-
-    Parâmetros
-    ----------
-    tags : list[str]
-        Nomes das tags de entrada (ex: ["Born_to_Run", "Superunknown"]).
-    timestamp : int
-        Timestamp em milissegundos do post de referência.
-    top_k : int
-        Quantos posts recomendar (padrão: 10).
-    excluir_tags_exatas : bool
-        Remove posts com conjunto de tags idêntico ao da entrada.
-    peso_popularidade : float
-        Peso do sinal de popularidade no score padrão/fallback (padrão: 0.10).
-    user_id : int | None
-        Identificador do usuário alvo; se houver perfil disponível, ativa personalização.
-
-    Retorna
-    -------
-    pd.DataFrame com os top_k posts recomendados e seus scores de relevância.
-    """
-    return _get_modelo().recomendar(
-        tags,
-        timestamp,
-        top_k,
-        excluir_tags_exatas,
-        peso_popularidade,
-        user_id,
+    return _get_modelo(model_dir).recommend_df(
+        tags=tags,
+        timestamp=timestamp,
+        top_k=top_k,
+        excluir_tags_exatas=excluir_tags_exatas,
+        peso_popularidade=peso_popularidade,
+        user_id=user_id,
     )
 
 
@@ -399,12 +90,24 @@ Exemplos:
         action="store_true",
         help="Inclui posts com conjunto de tags idêntico ao de entrada",
     )
+    parser.add_argument(
+        "--model-dir",
+        type=str,
+        default=str(MODELO_DIR),
+        help="Diretório do modelo a carregar",
+    )
 
     args = parser.parse_args()
-    modelo = _get_modelo()
+    modelo = _get_modelo(args.model_dir)
 
     if args.listar_tags:
-        tags_conhecidas = sorted(modelo._vectorizer.classes_)
+        vectorizer = None
+        if hasattr(modelo, "_vectorizer"):
+            vectorizer = modelo._vectorizer
+        elif getattr(modelo, "artifacts", None) is not None:
+            vectorizer = modelo.artifacts.vectorizer
+
+        tags_conhecidas = sorted(vectorizer.classes_) if vectorizer is not None else []
         print(f"Tags conhecidas pelo modelo ({len(tags_conhecidas)}):")
         for tag in tags_conhecidas:
             print(f"  {tag}")
@@ -421,9 +124,10 @@ Exemplos:
     print(f"  User ID   : {args.user_id if args.user_id is not None else '(não informado)'}")
     print(f"  Top-K     : {args.top_k}")
     print(f"  Peso pop. : {args.peso_popularidade}")
+    print(f"  Model dir : {resolve_model_dir(args.model_dir)}")
     print()
 
-    df = modelo.recomendar(
+    df = modelo.recommend_df(
         tags=tags_entrada,
         timestamp=args.timestamp,
         top_k=args.top_k,

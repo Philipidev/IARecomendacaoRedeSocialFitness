@@ -21,6 +21,7 @@ ROOT = Path(__file__).resolve().parent.parent
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
+from progress_utils import IterationProgress
 from treinamento.recomendar import recomendar
 
 MS_POR_DIA = 86_400_000
@@ -115,7 +116,7 @@ def _avaliar_criterios(caso: dict[str, Any], saida: pd.DataFrame, tags_entrada: 
     # 3) variedade
     c3 = criterios.get("variedade", {})
     min_unicos = int(c3.get("minimo_conjuntos_unicos", 1))
-    unicos = len({tuple(sorted(list(s))) for s in tags_series})
+    unicos = len({tuple(sorted(s)) for s in tags_series})
     resultados.append(
         ResultadoCriterio(
             nome="variedade",
@@ -224,11 +225,45 @@ def _gerar_relatorio(casos_resultados: list[dict[str, Any]], destino: Path) -> N
     destino.write_text("\n".join(linhas) + "\n", encoding="utf-8")
 
 
-def executar_avaliacao(casos_path: Path, saida_path: Path) -> None:
+def _gerar_sumario_json(casos_resultados: list[dict[str, Any]]) -> dict[str, Any]:
+    total_casos = len(casos_resultados)
+    aprovados = sum(1 for c in casos_resultados if c["aprovado_global"])
+    criterios_total = sum(len(c["criterios_avaliados"]) for c in casos_resultados)
+    criterios_aprovados = sum(
+        1
+        for c in casos_resultados
+        for criterio in c["criterios_avaliados"]
+        if criterio.aprovado
+    )
+    return {
+        "total_casos": total_casos,
+        "casos_aprovados": aprovados,
+        "taxa_aprovacao_casos": (aprovados / total_casos) if total_casos else 0.0,
+        "total_criterios": criterios_total,
+        "criterios_aprovados": criterios_aprovados,
+        "taxa_aprovacao_criterios": (
+            criterios_aprovados / criterios_total if criterios_total else 0.0
+        ),
+    }
+
+
+def executar_avaliacao(
+    casos_path: Path,
+    saida_path: Path,
+    model_dir: str | None = None,
+    saida_json: Path | None = None,
+) -> dict[str, Any]:
     casos = _carregar_casos(casos_path)
     resultados: list[dict[str, Any]] = []
+    progress = IterationProgress(
+        total=len(casos),
+        label="Avaliação manual",
+        every_percent=10,
+    )
+    if casos:
+        progress.start("Executando casos")
 
-    for caso in casos:
+    for idx, caso in enumerate(casos, start=1):
         entrada = caso.get("entrada", {})
         tags = entrada.get("tags", [])
         timestamp = int(entrada.get("timestamp", 0))
@@ -250,7 +285,12 @@ def executar_avaliacao(casos_path: Path, saida_path: Path) -> None:
         }
 
         try:
-            df = recomendar(tags=tags, timestamp=timestamp, top_k=top_k)
+            df = recomendar(
+                tags=tags,
+                timestamp=timestamp,
+                top_k=top_k,
+                model_dir=model_dir,
+            )
             saida = _preparar_saida(df)
             criterios = _avaliar_criterios(caso, saida, tags, timestamp)
             registro["saida"] = saida
@@ -263,8 +303,17 @@ def executar_avaliacao(casos_path: Path, saida_path: Path) -> None:
             registro["aprovado_global"] = False
 
         resultados.append(registro)
+        if casos:
+            progress.log(idx, detail=f"Caso atual: {registro['id']}")
 
     _gerar_relatorio(resultados, saida_path)
+    if casos:
+        progress.finish("Casos executados")
+    resumo = _gerar_sumario_json(resultados)
+    if saida_json is not None:
+        saida_json.parent.mkdir(parents=True, exist_ok=True)
+        saida_json.write_text(json.dumps(resumo, ensure_ascii=False, indent=2), encoding="utf-8")
+    return resumo
 
 
 def main() -> None:
@@ -275,9 +324,24 @@ def main() -> None:
         default="avaliacao/resultados/avaliacao_manual.md",
         help="Arquivo markdown de saída",
     )
+    parser.add_argument(
+        "--saida-json",
+        default=None,
+        help="Arquivo JSON opcional com resumo consolidado da avaliação manual",
+    )
+    parser.add_argument(
+        "--model-dir",
+        default=None,
+        help="Diretório do modelo/ranker a ser avaliado",
+    )
     args = parser.parse_args()
 
-    executar_avaliacao(Path(args.casos), Path(args.saida))
+    executar_avaliacao(
+        Path(args.casos),
+        Path(args.saida),
+        model_dir=args.model_dir,
+        saida_json=Path(args.saida_json) if args.saida_json else None,
+    )
     print(f"Relatório gerado em: {args.saida}")
 
 

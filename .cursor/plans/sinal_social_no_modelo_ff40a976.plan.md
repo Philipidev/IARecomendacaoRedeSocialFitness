@@ -103,7 +103,7 @@ flowchart TD
 
 ### `[treinamento/recomendar.py](treinamento/recomendar.py)`
 
-- Em `__init_`_: adiciona `self._social_scores: np.ndarray | None = None`
+- Em `__init`__: adiciona `self._social_scores: np.ndarray | None = None`
 - Em `carregar()`: tenta carregar `social_scores.npy` (não obrigatório; fallback para zeros)
 - Nova constante `PESO_SOCIAL = 0.20` e ajuste das demais
 - Novo método `_score_social()`: retorna `self._social_scores` diretamente (já normalizado)

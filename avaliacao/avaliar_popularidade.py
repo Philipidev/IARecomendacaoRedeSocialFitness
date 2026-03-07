@@ -18,12 +18,16 @@ import ast
 import json
 from dataclasses import dataclass
 from pathlib import Path
+import sys
 
 import numpy as np
 import pandas as pd
 
-
 ROOT = Path(__file__).resolve().parent.parent
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+
+from progress_utils import IterationProgress
 SPLITS_DIR = ROOT / "treinamento" / "dados" / "splits"
 
 
@@ -79,8 +83,22 @@ def ndcg_at_k(rels: list[float], k: int) -> float:
 
 def avaliar_real(modelo, queries: list[Query], peso_popularidade: float, k: int) -> dict[str, float]:
     precisions, ndcgs = [], []
-    for q in queries:
-        df = modelo.recomendar(tags=q.tags, timestamp=q.timestamp, top_k=k, excluir_tags_exatas=False, peso_popularidade=peso_popularidade)
+    progress = IterationProgress(
+        total=len(queries),
+        label=f"Popularidade real k={k}",
+        every_percent=10,
+    )
+    if queries:
+        progress.start("Processando queries")
+
+    for idx, q in enumerate(queries, start=1):
+        df = modelo.recommend_df(
+            tags=q.tags,
+            timestamp=q.timestamp,
+            top_k=k,
+            excluir_tags_exatas=False,
+            peso_popularidade=peso_popularidade,
+        )
         query_tags = set(q.tags)
         rels = []
         for tags_post in df.get("tags_fitness", []).tolist() if not df.empty else []:
@@ -90,6 +108,11 @@ def avaliar_real(modelo, queries: list[Query], peso_popularidade: float, k: int)
             rels.append(inter / uni)
         precisions.append(precision_at_k(rels, k))
         ndcgs.append(ndcg_at_k(rels, k))
+        if queries:
+            progress.log(idx)
+
+    if queries:
+        progress.finish("Avaliação real finalizada")
 
     return {f"precision@{k}": float(np.mean(precisions)) if precisions else 0.0, f"ndcg@{k}": float(np.mean(ndcgs)) if ndcgs else 0.0, "num_queries": len(queries)}
 
@@ -107,18 +130,34 @@ def avaliar_demo(peso_popularidade: float, k: int, n_queries: int = 200) -> tupl
     # Relevância latente com contribuição de popularidade (simula cenário em que ela ajuda)
     rel_true = 0.30 * cosine + 0.20 * cooc + 0.15 * time_decay + 0.15 * social + 0.20 * popularity
 
-    def run(weight_pop: float) -> dict[str, float]:
+    def run(weight_pop: float, label: str) -> dict[str, float]:
         precisions, ndcgs = [], []
-        for _ in range(n_queries):
+        progress = IterationProgress(
+            total=n_queries,
+            label=label,
+            every_percent=10,
+        )
+        if n_queries > 0:
+            progress.start("Processando benchmark sintético")
+
+        for idx in range(n_queries):
             noise = rng.normal(0, 0.02, size=n_items)
             score = 0.35 * cosine + 0.25 * cooc + 0.15 * time_decay + 0.15 * social + weight_pop * popularity + noise
             top_idx = np.argsort(score)[::-1][:k]
             rels = rel_true[top_idx].tolist()
             precisions.append(precision_at_k(rels, k))
             ndcgs.append(ndcg_at_k(rels, k))
+            if n_queries > 0:
+                progress.log(idx + 1)
+
+        if n_queries > 0:
+            progress.finish("Benchmark sintético finalizado")
         return {f"precision@{k}": float(np.mean(precisions)), f"ndcg@{k}": float(np.mean(ndcgs)), "num_queries": n_queries}
 
-    return run(0.0), run(peso_popularidade)
+    return (
+        run(0.0, f"Popularidade demo antes k={k}"),
+        run(peso_popularidade, f"Popularidade demo depois k={k}"),
+    )
 
 
 def main() -> None:
@@ -128,16 +167,20 @@ def main() -> None:
     parser.add_argument("--max-queries", type=int, default=200)
     parser.add_argument("--out-json", type=str, default="avaliacao/metricas_antes_depois.json")
     parser.add_argument("--demo", action="store_true", help="Executa benchmark sintético sem depender de artefatos de treino")
+    parser.add_argument(
+        "--model-dir",
+        type=str,
+        default="treinamento/modelo",
+        help="Diretório do modelo baseline a ser avaliado",
+    )
     args = parser.parse_args()
 
     if args.demo:
         antes, depois = avaliar_demo(args.peso_depois, args.k, args.max_queries)
         modo = "demo"
     else:
-        import sys
-        sys.path.insert(0, str(ROOT))
         from treinamento.recomendar import ModeloRecomendacao
-        modelo = ModeloRecomendacao().carregar()
+        modelo = ModeloRecomendacao(args.model_dir).carregar()
         queries = carregar_queries(max_queries=args.max_queries)
         antes = avaliar_real(modelo, queries, 0.0, args.k)
         depois = avaliar_real(modelo, queries, args.peso_depois, args.k)

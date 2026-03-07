@@ -35,6 +35,8 @@ ROOT = Path(__file__).resolve().parent.parent
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
+from progress_utils import IterationProgress
+from treinamento.model_utils import resolve_model_dir
 from treinamento.recomendar import MODELO_DIR, ModeloRecomendacao
 
 SPLITS_DIR = ROOT / "treinamento" / "dados" / "splits"
@@ -229,13 +231,19 @@ def avaliar_pesos(
     )
 
 
-def salvar_resultados(df: pd.DataFrame) -> None:
-    RESULTADOS_PATH.parent.mkdir(parents=True, exist_ok=True)
-    df.to_csv(RESULTADOS_PATH, index=False)
+def salvar_resultados(df: pd.DataFrame, out_csv: Path) -> None:
+    out_csv.parent.mkdir(parents=True, exist_ok=True)
+    df.to_csv(out_csv, index=False)
 
 
-def salvar_melhor_peso(linha: pd.Series, top_k: int, grid_step: float, random_search: int) -> None:
-    MODELO_DIR.mkdir(parents=True, exist_ok=True)
+def salvar_melhor_peso(
+    linha: pd.Series,
+    top_k: int,
+    grid_step: float,
+    random_search: int,
+    pesos_path: Path,
+) -> None:
+    pesos_path.parent.mkdir(parents=True, exist_ok=True)
     payload = {
         "w_cos": float(linha["w_cos"]),
         "w_cooc": float(linha["w_cooc"]),
@@ -250,7 +258,7 @@ def salvar_melhor_peso(linha: pd.Series, top_k: int, grid_step: float, random_se
             "timestamp_utc": datetime.now(timezone.utc).isoformat(),
         },
     }
-    with open(PESOS_OTIMOS_PATH, "w", encoding="utf-8") as f:
+    with open(pesos_path, "w", encoding="utf-8") as f:
         json.dump(payload, f, ensure_ascii=False, indent=2)
 
 
@@ -262,23 +270,56 @@ def main() -> None:
     parser.add_argument("--top-k", type=int, default=10, help="Top-K da métrica NDCG@K")
     parser.add_argument("--max-queries", type=int, default=300, help="Limite de consultas da validação (0 = todas)")
     parser.add_argument("--seed", type=int, default=42, help="Seed reprodutível")
+    parser.add_argument(
+        "--model-dir",
+        type=str,
+        default=str(MODELO_DIR),
+        help="Diretório do modelo baseline a ser otimizado",
+    )
+    parser.add_argument(
+        "--out-csv",
+        type=str,
+        default=str(RESULTADOS_PATH),
+        help="Arquivo CSV de saída com os experimentos avaliados",
+    )
+    parser.add_argument(
+        "--out-json",
+        type=str,
+        default=None,
+        help="Arquivo JSON opcional para salvar os pesos ótimos",
+    )
     args = parser.parse_args()
 
     rng = np.random.default_rng(args.seed)
+    model_dir = resolve_model_dir(args.model_dir)
+    out_csv = Path(args.out_csv)
+    if not out_csv.is_absolute():
+        out_csv = ROOT / out_csv
+    pesos_path = Path(args.out_json) if args.out_json else (model_dir / "pesos_otimos.json")
+    if not pesos_path.is_absolute():
+        pesos_path = ROOT / pesos_path
 
     print("Carregando dados de validação...")
     validacao = carregar_validacao()
     print(f"  Consultas válidas: {len(validacao)}")
 
     print("Carregando artefatos do modelo...")
-    modelo = ModeloRecomendacao().carregar()
+    modelo = ModeloRecomendacao(model_dir).carregar()
 
     print("Executando Grid Search...")
     combinacoes = gerar_combinacoes_grid(args.grid_step)
     print(f"  Combinações de grid: {len(combinacoes)}")
 
     resultados: list[ResultadoPesos] = []
-    for pesos in combinacoes:
+    grid_progress = IterationProgress(
+        total=len(combinacoes),
+        label="Otimização grid",
+        every_percent=5,
+    )
+    if combinacoes:
+        grid_progress.start("Avaliando combinações do grid")
+
+    for idx, pesos in enumerate(combinacoes, start=1):
         resultados.append(
             avaliar_pesos(
                 modelo=modelo,
@@ -289,6 +330,11 @@ def main() -> None:
                 rng=rng,
             )
         )
+        if combinacoes:
+            grid_progress.log(idx)
+
+    if combinacoes:
+        grid_progress.finish("Grid Search finalizado")
 
     if args.random_search > 0 and resultados:
         print("Executando Random Search (refino)...")
@@ -306,11 +352,21 @@ def main() -> None:
             )
 
         vistos = {(r.w_cos, r.w_cooc, r.w_time, r.w_social) for r in resultados}
-        for pesos in extras:
+        random_progress = IterationProgress(
+            total=len(extras),
+            label="Otimização random",
+            every_percent=10,
+        )
+        if extras:
+            random_progress.start("Avaliando amostras do refino")
+
+        for idx, pesos in enumerate(extras, start=1):
             soma = sum(pesos)
             if not math.isclose(soma, 1.0, rel_tol=0, abs_tol=1e-4):
+                random_progress.log(idx)
                 continue
             if pesos in vistos:
+                random_progress.log(idx)
                 continue
             vistos.add(pesos)
             resultados.append(
@@ -323,6 +379,10 @@ def main() -> None:
                     rng=rng,
                 )
             )
+            random_progress.log(idx)
+
+        if extras:
+            random_progress.finish("Random Search finalizado")
 
     df_res = pd.DataFrame([r.__dict__ for r in resultados])
     if df_res.empty:
@@ -334,9 +394,15 @@ def main() -> None:
         ascending=False,
     ).reset_index(drop=True)
 
-    salvar_resultados(df_res)
+    salvar_resultados(df_res, out_csv)
     melhor = df_res.iloc[0]
-    salvar_melhor_peso(melhor, top_k=args.top_k, grid_step=args.grid_step, random_search=args.random_search)
+    salvar_melhor_peso(
+        melhor,
+        top_k=args.top_k,
+        grid_step=args.grid_step,
+        random_search=args.random_search,
+        pesos_path=pesos_path,
+    )
 
     print("\n=== Melhor configuração ===")
     print(
@@ -346,8 +412,8 @@ def main() -> None:
     print(f"NDCG@{args.top_k}: {melhor['ndcg_at_k']:.4f}")
     print(f"Precision@{args.top_k}: {melhor['precision_at_k']:.4f}")
     print(f"Avg Jaccard@{args.top_k}: {melhor['avg_jaccard_at_k']:.4f}")
-    print(f"Resultados salvos em: {RESULTADOS_PATH}")
-    print(f"Pesos ótimos exportados em: {PESOS_OTIMOS_PATH}")
+    print(f"Resultados salvos em: {out_csv}")
+    print(f"Pesos ótimos exportados em: {pesos_path}")
 
 
 if __name__ == "__main__":

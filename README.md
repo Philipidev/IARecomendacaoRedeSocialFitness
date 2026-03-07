@@ -14,7 +14,12 @@ Use um dos datasets completos do [SURF/CWI](https://repository.surfsara.nl/commu
 ## Estrutura
 
 ```
-├── extracao_filtragem/         # Extração e filtragem
+├── main.py                      # Orquestrador interativo do pipeline
+├── casos_uso_tcc.json           # Configuração raiz do benchmark multi-modelo
+├── avaliacao/                   # Avaliações e benchmark
+│   ├── benchmark_modelos.py     # Runner multi-modelo do TCC
+│   └── resultados/              # Relatórios e comparativos (gerado)
+├── extracao_filtragem/          # Extração e filtragem
 │   ├── dataset/                # Dataset bruto (.tar.zst)
 │   ├── download_dataset.py     # Script de download
 │   ├── pipeline.py             # Script principal
@@ -29,19 +34,23 @@ Use um dos datasets completos do [SURF/CWI](https://repository.surfsara.nl/commu
 └── treinamento/                # IA de recomendação
     ├── preparacao_dados.py     # Feature engineering a partir dos parquets
     ├── treinar.py              # Treina e serializa os artefatos do modelo
+    ├── preparar_dataset_ltr.py # Monta datasets query-item para LTR
+    ├── treinar_ltr.py          # Treina o LightGBMRanker
     ├── recomendar.py           # Inferência — função recomendar() + CLI
+    ├── rankers.py              # Abstração plugável de rankers
     ├── dados/                  # Artefatos intermediários (gerado)
     │   ├── posts_metadata.parquet
     │   ├── interacoes_por_tag.parquet
     │   ├── social_scores.parquet
     │   ├── user_tag_profile.parquet
     │   └── tag_lista.txt
-    └── modelo/                 # Artefatos do modelo treinado (gerado)
-        ├── vectorizer.pkl
-        ├── post_matrix.npy
-        ├── tag_cooccurrence_map.pkl
-        ├── popularidade.npy
-        └── social_scores.npy
+    ├── modelo/                 # Modelo padrão/legado (gerado)
+    │   ├── vectorizer.pkl
+    │   ├── post_matrix.npy
+    │   ├── tag_cooccurrence_map.pkl
+    │   ├── popularidade.npy
+    │   └── social_scores.npy
+    └── modelos/                # Modelos por experimento do benchmark (gerado)
 ```
 
 ## Pré-requisitos
@@ -51,7 +60,40 @@ Use um dos datasets completos do [SURF/CWI](https://repository.surfsara.nl/commu
 - zstd (Linux: `apt install zstd`; Windows: [releases](https://github.com/facebook/zstd/releases))
 - tar (Windows 10+ inclui)
 
-## Execução
+## Orquestrador Interativo
+
+Fluxo recomendado a partir da raiz do projeto:
+
+```bash
+python main.py
+```
+
+O `main.py` oferece um menu para:
+
+- selecionar um dataset já baixado
+- baixar um novo dataset e ativá-lo
+- selecionar o modelo/experimento alvo
+- rodar extração
+- rodar treinamento
+- rodar avaliação
+- rodar casos de uso do TCC
+- rodar extração + treinamento + avaliação
+- rodar treinamento + avaliação
+- visualizar o estado atual salvo
+
+O contexto fica persistido em `.pipeline_state.json`, incluindo dataset ativo,
+artefatos detectados no disco, alvo de modelo/experimento, escopo do benchmark
+TCC e o histórico das últimas execuções por etapa.
+
+No fluxo interativo:
+
+- o alvo pode ser o `treinamento/modelo/` padrão ou um experimento de `casos_uso_tcc.json`
+- treino e avaliação passam a respeitar o `model_dir` do alvo selecionado
+- avaliações de `popularidade` e `otimização` só aparecem como compatíveis para a família baseline
+- se o dataset selecionado estiver ausente localmente, o `main.py` tenta baixá-lo automaticamente pelo `scale_factor` salvo
+- o benchmark TCC pode rodar todos os modelos habilitados ou apenas um subconjunto escolhido no menu
+
+## Execução Manual
 
 ### 1. Baixar o dataset
 
@@ -113,6 +155,32 @@ python treinamento/treinar.py
 
 Ajusta o `MultiLabelBinarizer` sobre os nomes das tags, computa a matriz de posts e serializa os artefatos em `treinamento/modelo/`, incluindo `social_scores.npy`.
 
+Para os experimentos do TCC, existe o modo com catálogo completo e estatísticas
+calculadas só no split de treino:
+
+```bash
+python treinamento/treinar.py --catalogo-completo --model-dir treinamento/modelos/baseline_hibrido_padrao
+```
+
+### 3A. Benchmark multi-modelo com LTR
+
+```bash
+python avaliacao/benchmark_modelos.py --config casos_uso_tcc.json
+```
+
+Esse fluxo lê `casos_uso_tcc.json`, treina múltiplos modelos baseline e LTR,
+salva cada experimento em `treinamento/modelos/<model_id>/` e gera o comparativo
+consolidado em:
+
+- `avaliacao/resultados/benchmark_modelos.csv`
+- `avaliacao/resultados/benchmark_modelos.md`
+- `avaliacao/resultados/benchmark_modelos.json`
+
+Pelo `main.py`, o benchmark também pode ser parametrizado para executar:
+
+- todos os modelos habilitados em `casos_uso_tcc.json`
+- apenas um subconjunto de `model_id`s selecionado interativamente
+
 ### 4. Recomendar posts (CLI)
 
 ```bash
@@ -165,10 +233,10 @@ a afinidade usuário-item substitui o sinal de popularidade.
 
 | Sinal | Peso (padrão) | Peso (personalizado) | Descrição |
 |---|---|---|---|
-| Similaridade de conteúdo | 0.35 | 0.30 | Coseno entre vetores de tags (MultiLabelBinarizer) |
+| Similaridade de conteúdo | 0.40 | 0.30 | Coseno entre vetores de tags (MultiLabelBinarizer) |
 | Co-ocorrência de tags | 0.25 | 0.20 | Boost para tags relacionadas que também aparecem no post |
 | Recência relativa | 0.15 | 0.15 | Decaimento exponencial pela distância em dias ao timestamp de entrada |
-| Influência social | 0.15 | 0.15 | Soma do grau dos usuários que interagiram com o post no grafo social |
+| Influência social | 0.20 | 0.15 | Soma do grau dos usuários que interagiram com o post no grafo social |
 | Popularidade de tags | 0.10 (configurável) | - | Volume histórico de interações das tags do post (`popularidade.npy`) |
 | Afinidade usuário-item | - | 0.20 | Perfil do usuário com interesses explícitos, interações recentes e sinais sociais dos vizinhos |
 

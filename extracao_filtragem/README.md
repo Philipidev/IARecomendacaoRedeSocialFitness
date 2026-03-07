@@ -32,6 +32,19 @@ Além disso, é necessário ter disponível no sistema:
 - **zstd** — descompressão do `.tar.zst` (Linux: `apt install zstd`; Windows: [github.com/facebook/zstd/releases](https://github.com/facebook/zstd/releases))
 - **tar** — incluído no Windows 10+, Linux e macOS
 
+## Orquestrador interativo
+
+Opcionalmente, em vez de executar os scripts desta pasta manualmente, você pode
+usar o orquestrador da raiz:
+
+```bash
+python main.py
+```
+
+No menu, escolha entre selecionar um dataset já baixado, baixar um novo dataset
+e rodar a etapa de extração. O contexto atual fica salvo em
+`.pipeline_state.json`, permitindo reutilizar o dataset ativo entre execuções.
+
 ## Como usar
 
 ### Passo 1 — Baixar o dataset

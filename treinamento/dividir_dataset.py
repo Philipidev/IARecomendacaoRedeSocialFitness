@@ -270,8 +270,8 @@ Exemplos:
     splits_posts = [("train", train), ("val", val), ("test", test)]
     for nome, df in splits_posts:
         caminho = SPLITS_DIR / f"{nome}_posts.parquet"
-        # Remove colunas auxiliares internas antes de salvar
-        df.drop(columns=["post_idx_original", "_message_id"], errors="ignore").to_parquet(caminho, index=True)
+        # Mantém colunas internas para rastreabilidade dos experimentos e benchmark.
+        df.to_parquet(caminho, index=True)
         print(f"  {nome}_posts.parquet salvo: {len(df)} posts")
 
     if has_interactions:

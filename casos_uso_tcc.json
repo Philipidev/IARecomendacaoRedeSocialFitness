@@ -1,0 +1,246 @@
+{
+  "version": 1,
+  "descricao": "Casos de uso do TCC para benchmark multi-modelo do recomendador fitness, cobrindo baseline híbrido e variações fortes de LTR.",
+  "benchmark": {
+    "resultados_dir": "avaliacao/resultados",
+    "modelos_dir": "treinamento/modelos",
+    "casos_manuais": "avaliacao/casos_manuais.yaml"
+  },
+  "modelos": [
+    {
+      "id": "baseline_hibrido_padrao",
+      "enabled": true,
+      "family": "baseline_hibrido",
+      "descricao": "Baseline híbrido de referência com catálogo completo e pesos manuais estáveis.",
+      "split_config": {
+        "train": 0.7,
+        "val": 0.15,
+        "test": 0.15,
+        "seed": 42
+      },
+      "training": {
+        "catalogo_completo": true,
+        "dataset_completo": false
+      },
+      "avaliacoes": {
+        "offline": true,
+        "manual": true,
+        "popularidade": true,
+        "otimizacao": false
+      },
+      "top_k": [5, 10, 20],
+      "metric_target": "ndcg@10",
+      "popularidade_k": 10,
+      "params": {
+        "w_cos": 0.4,
+        "w_cooc": 0.25,
+        "w_time": 0.15,
+        "w_social": 0.2,
+        "peso_popularidade": 0.1,
+        "usar_pesos_otimos": false,
+        "excluir_tags_exatas": true
+      },
+      "notes": "Caso-base leakage-free para comparar diretamente com as versões LTR."
+    },
+    {
+      "id": "baseline_hibrido_otimizado",
+      "enabled": true,
+      "family": "baseline_hibrido",
+      "descricao": "Baseline híbrido com busca mais fina de pesos no split de validação.",
+      "split_config": {
+        "train": 0.7,
+        "val": 0.15,
+        "test": 0.15,
+        "seed": 42
+      },
+      "training": {
+        "catalogo_completo": true,
+        "dataset_completo": false
+      },
+      "avaliacoes": {
+        "offline": true,
+        "manual": true,
+        "popularidade": true,
+        "otimizacao": true
+      },
+      "top_k": [5, 10, 20],
+      "metric_target": "ndcg@10",
+      "popularidade_k": 10,
+      "params": {
+        "peso_popularidade": 0.1,
+        "usar_pesos_otimos": true,
+        "grid_step": 0.05,
+        "random_search": 40,
+        "otimizacao_top_k": 10,
+        "max_queries_otimizacao": 500,
+        "excluir_tags_exatas": true
+      },
+      "notes": "Baseline forte para servir de teto competitivo antes do LTR."
+    },
+    {
+      "id": "ltr_lightgbm_v1_core",
+      "enabled": true,
+      "family": "ltr_lightgbm",
+      "descricao": "LTR LightGBM v1 usando apenas os cinco sinais principais do baseline como features.",
+      "split_config": {
+        "train": 0.7,
+        "val": 0.15,
+        "test": 0.15,
+        "seed": 42
+      },
+      "training": {
+        "catalogo_completo": true,
+        "dataset_completo": false
+      },
+      "dataset_ltr": {
+        "features_enabled": [
+          "cosine_score",
+          "cooccurrence_score",
+          "time_decay_score",
+          "social_score",
+          "popularidade_score"
+        ],
+        "negatives_per_query": 50,
+        "hard_negative_topn": 500,
+        "max_queries_train": 800,
+        "max_queries_val": 250,
+        "seed": 42
+      },
+      "avaliacoes": {
+        "offline": true,
+        "manual": true,
+        "popularidade": false,
+        "otimizacao": false
+      },
+      "top_k": [5, 10, 20],
+      "metric_target": "ndcg@10",
+      "params": {
+        "objective": "lambdarank",
+        "metric_at": [5, 10, 20],
+        "num_leaves": 31,
+        "learning_rate": 0.05,
+        "n_estimators": 350,
+        "min_data_in_leaf": 30,
+        "feature_fraction": 0.9,
+        "bagging_fraction": 0.8,
+        "bagging_freq": 1,
+        "seed": 42
+      },
+      "notes": "Caso LTR mais interpretável para medir o ganho puro do ranker sobre os sinais principais."
+    },
+    {
+      "id": "ltr_lightgbm_v1_contextual",
+      "enabled": true,
+      "family": "ltr_lightgbm",
+      "descricao": "LTR LightGBM v1 com sinais principais e features contextuais do item.",
+      "split_config": {
+        "train": 0.7,
+        "val": 0.15,
+        "test": 0.15,
+        "seed": 42
+      },
+      "training": {
+        "catalogo_completo": true,
+        "dataset_completo": false
+      },
+      "dataset_ltr": {
+        "features_enabled": [
+          "cosine_score",
+          "cooccurrence_score",
+          "time_decay_score",
+          "social_score",
+          "popularidade_score",
+          "tag_overlap_count",
+          "tag_jaccard",
+          "num_tags_candidate",
+          "content_length",
+          "message_type_code",
+          "language_code"
+        ],
+        "negatives_per_query": 75,
+        "hard_negative_topn": 750,
+        "max_queries_train": 1200,
+        "max_queries_val": 350,
+        "seed": 42
+      },
+      "avaliacoes": {
+        "offline": true,
+        "manual": true,
+        "popularidade": false,
+        "otimizacao": false
+      },
+      "top_k": [5, 10, 20],
+      "metric_target": "ndcg@10",
+      "params": {
+        "objective": "lambdarank",
+        "metric_at": [5, 10, 20],
+        "num_leaves": 63,
+        "learning_rate": 0.05,
+        "n_estimators": 450,
+        "min_data_in_leaf": 20,
+        "feature_fraction": 0.9,
+        "bagging_fraction": 0.8,
+        "bagging_freq": 1,
+        "seed": 42
+      },
+      "notes": "Versão completa do LTR v1 para comparar com o baseline otimizado em um cenário mais rico."
+    },
+    {
+      "id": "ltr_lightgbm_v1_robusto",
+      "enabled": true,
+      "family": "ltr_lightgbm",
+      "descricao": "LTR LightGBM v1 mais robusto, com mais queries, mais negativos difíceis e regularização maior.",
+      "split_config": {
+        "train": 0.7,
+        "val": 0.15,
+        "test": 0.15,
+        "seed": 42
+      },
+      "training": {
+        "catalogo_completo": true,
+        "dataset_completo": false
+      },
+      "dataset_ltr": {
+        "features_enabled": [
+          "cosine_score",
+          "cooccurrence_score",
+          "time_decay_score",
+          "social_score",
+          "popularidade_score",
+          "tag_overlap_count",
+          "tag_jaccard",
+          "num_tags_candidate",
+          "content_length",
+          "message_type_code",
+          "language_code"
+        ],
+        "negatives_per_query": 100,
+        "hard_negative_topn": 1000,
+        "max_queries_train": 1600,
+        "max_queries_val": 500,
+        "seed": 42
+      },
+      "avaliacoes": {
+        "offline": true,
+        "manual": true,
+        "popularidade": false,
+        "otimizacao": false
+      },
+      "top_k": [5, 10, 20],
+      "metric_target": "ndcg@10",
+      "params": {
+        "objective": "lambdarank",
+        "metric_at": [5, 10, 20],
+        "num_leaves": 63,
+        "learning_rate": 0.03,
+        "n_estimators": 650,
+        "min_data_in_leaf": 40,
+        "feature_fraction": 0.85,
+        "bagging_fraction": 0.75,
+        "bagging_freq": 1,
+        "seed": 42
+      },
+      "notes": "Variante mais pesada para tentar ganhar generalização mantendo a mesma família LTR v1."
+    }
+  ]
+}
