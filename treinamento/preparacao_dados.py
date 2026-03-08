@@ -14,6 +14,7 @@ Uso:
 
 from __future__ import annotations
 
+import argparse
 import ast
 import os
 import sys
@@ -23,9 +24,11 @@ import numpy as np
 import pandas as pd
 
 ROOT = Path(__file__).resolve().parent.parent
-OUTPUT_DIR = ROOT / "extracao_filtragem" / "output"
 TREINAMENTO_DIR = ROOT / "treinamento"
-DADOS_DIR = TREINAMENTO_DIR / "dados"
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+
+from dataset_context import build_stage_manifest, dataset_context, rel_path, write_manifest
 
 EVENTO_PESO = {
     "like": 1.0,
@@ -50,7 +53,7 @@ def _parse_tags(value) -> list[str]:
     return []
 
 
-def carregar_parquets() -> dict[str, pd.DataFrame]:
+def carregar_parquets(output_dir: Path) -> dict[str, pd.DataFrame]:
     nomes = [
         "messages_fitness",
         "tags_fitness",
@@ -61,7 +64,7 @@ def carregar_parquets() -> dict[str, pd.DataFrame]:
     ]
     dados = {}
     for nome in nomes:
-        caminho = OUTPUT_DIR / f"{nome}.parquet"
+        caminho = output_dir / f"{nome}.parquet"
         if not caminho.exists():
             print(f"[AVISO] {caminho} não encontrado — pulando.")
             continue
@@ -74,27 +77,32 @@ def carregar_parquets() -> dict[str, pd.DataFrame]:
 def preparar_posts(messages: pd.DataFrame) -> pd.DataFrame:
     """
     Constrói o DataFrame de posts para o modelo.
-    Remove message_id da interface de saída; mantém apenas valores semânticos.
-    Internamente usa um índice posicional (post_idx) para lookups vetorizados.
+    Preserva explicitamente message_id para evitar dependência de alinhamento posicional
+    com messages_fitness.parquet.
     """
     df = messages.copy()
 
     df["tags_fitness"] = df["tags_fitness"].apply(_parse_tags)
 
-    # Converte timestamp de ms para datetime legível (garante tipo numérico antes)
+    if "message_id" in df.columns:
+        df["message_id"] = pd.to_numeric(df["message_id"], errors="coerce").astype("Int64")
+        df["_message_id"] = df["message_id"]
+
+    # Contrato temporal único do pipeline: timestamps em ms.
     df["creation_date"] = pd.to_numeric(df["creation_date"], errors="coerce")
     df["creation_date_dt"] = pd.to_datetime(df["creation_date"], unit="ms", utc=True)
     df["creation_date_iso"] = df["creation_date_dt"].dt.strftime("%Y-%m-%dT%H:%M:%SZ")
 
-    # Índice posicional usado internamente pelo modelo (não é o message_id)
+    # Índice posicional usado internamente pelo modelo; o identificador canônico continua em _message_id.
     df = df.reset_index(drop=True)
     df.index.name = "post_idx"
 
-    # Colunas expostas na saída (sem IDs)
     colunas_saida = [
+        "_message_id",
+        "message_id",
         "message_type",
-        "creation_date",        # timestamp ms — usado para time_decay
-        "creation_date_iso",    # legível
+        "creation_date",
+        "creation_date_iso",
         "content_length",
         "language",
         "tags_fitness",
@@ -315,12 +323,60 @@ def salvar_tag_lista(tags_fitness: pd.DataFrame, dados_dir: Path) -> None:
 
 
 def main() -> None:
-    print("=== Preparação de dados ===\n")
+    parser = argparse.ArgumentParser(description="Prepara artefatos derivados para treino.")
+    parser.add_argument(
+        "--dataset-key",
+        type=str,
+        default=None,
+        help="Namespace lógico do dataset; se omitido, usa layout legado",
+    )
+    parser.add_argument(
+        "--dataset-path",
+        type=str,
+        default=None,
+        help="Caminho opcional do dataset para registrar proveniência",
+    )
+    parser.add_argument(
+        "--scale-factor",
+        type=str,
+        default=None,
+        help="Scale factor opcional para registrar proveniência",
+    )
+    parser.add_argument(
+        "--output-dir",
+        type=str,
+        default=None,
+        help="Override opcional do diretório de parquets extraídos",
+    )
+    parser.add_argument(
+        "--dados-dir",
+        type=str,
+        default=None,
+        help="Override opcional do diretório de saída dos dados preparados",
+    )
+    args = parser.parse_args()
 
-    DADOS_DIR.mkdir(parents=True, exist_ok=True)
+    context = dataset_context(
+        dataset_key=args.dataset_key,
+        dataset_path=args.dataset_path,
+        scale_factor=args.scale_factor,
+    )
+    output_dir = Path(args.output_dir) if args.output_dir else context.output_dir
+    if not output_dir.is_absolute():
+        output_dir = (ROOT / output_dir).resolve()
+    dados_dir = Path(args.dados_dir) if args.dados_dir else context.dados_dir
+    if not dados_dir.is_absolute():
+        dados_dir = (ROOT / dados_dir).resolve()
+
+    print("=== Preparação de dados ===\n")
+    print(f"Namespace ativo : {context.dataset_key or 'legado'}")
+    print(f"Input extração  : {output_dir}")
+    print(f"Output dados    : {dados_dir}\n")
+
+    dados_dir.mkdir(parents=True, exist_ok=True)
 
     print("Carregando parquets...")
-    dados = carregar_parquets()
+    dados = carregar_parquets(output_dir)
 
     if "messages_fitness" not in dados:
         print("ERRO: messages_fitness.parquet não encontrado. Execute o pipeline primeiro.")
@@ -328,14 +384,14 @@ def main() -> None:
 
     print("\nPreparando posts...")
     posts = preparar_posts(dados["messages_fitness"])
-    caminho_posts = DADOS_DIR / "posts_metadata.parquet"
+    caminho_posts = dados_dir / "posts_metadata.parquet"
     posts.to_parquet(caminho_posts, index=True)
     print(f"  posts_metadata.parquet: {len(posts)} posts salvos em {caminho_posts}")
 
     if "interactions_fitness" in dados:
         print("\nCalculando popularidade de tags...")
         pop = calcular_popularidade_tags(dados["interactions_fitness"])
-        caminho_pop = DADOS_DIR / "interacoes_por_tag.parquet"
+        caminho_pop = dados_dir / "interacoes_por_tag.parquet"
         pop.to_parquet(caminho_pop, index=False)
         print(f"  interacoes_por_tag.parquet: {len(pop)} tags salvas em {caminho_pop}")
 
@@ -350,7 +406,7 @@ def main() -> None:
             dados["interactions_fitness"],
             dados["user_social_graph"],
         )
-        caminho_social = DADOS_DIR / "social_scores.parquet"
+        caminho_social = dados_dir / "social_scores.parquet"
         social_scores.to_parquet(caminho_social, index=True)
         print(
             f"  social_scores.parquet: {len(social_scores)} posts salvos em {caminho_social}"
@@ -361,7 +417,7 @@ def main() -> None:
 
     if "tags_fitness" in dados:
         print("\nSalvando lista canônica de tags...")
-        salvar_tag_lista(dados["tags_fitness"], DADOS_DIR)
+        salvar_tag_lista(dados["tags_fitness"], dados_dir)
 
     if "interactions_fitness" in dados and "user_interests_fitness" in dados:
         print("\nConstruindo perfis de afinidade por usuário...")
@@ -370,7 +426,7 @@ def main() -> None:
             dados["user_interests_fitness"],
             dados.get("user_social_graph"),
         )
-        caminho_user_profile = DADOS_DIR / "user_tag_profile.parquet"
+        caminho_user_profile = dados_dir / "user_tag_profile.parquet"
         user_tag_profile.to_parquet(caminho_user_profile, index=False)
         print(
             f"  user_tag_profile.parquet: {len(user_tag_profile)} pares usuário-tag salvos em {caminho_user_profile}"
@@ -382,10 +438,48 @@ def main() -> None:
         )
 
     print("\nSalvando métricas como arquivos .txt...")
-    salvar_metricas_txt(dados, DADOS_DIR)
+    salvar_metricas_txt(dados, dados_dir)
+
+    manifest = build_stage_manifest(
+        stage="preparacao_dados",
+        context=context,
+        extra={
+            "source_output_dir": rel_path(output_dir),
+            "dados_dir": rel_path(dados_dir),
+            "data_contract": {
+                "post_id_column": "_message_id",
+                "timestamp_unit": "ms",
+            },
+            "artefatos": [
+                "posts_metadata.parquet",
+                "interacoes_por_tag.parquet",
+                "social_scores.parquet",
+                "user_tag_profile.parquet",
+                "tag_lista.txt",
+            ],
+            "summary": {
+                "posts_metadata": int(len(posts)),
+                "posts_with_message_id": int(posts["_message_id"].notna().sum())
+                if "_message_id" in posts.columns
+                else 0,
+                "interacoes_por_tag": int(len(pop)) if "interactions_fitness" in dados else 0,
+                "social_scores": int(len(social_scores))
+                if (
+                    "user_social_graph" in dados
+                    and "interactions_fitness" in dados
+                    and "messages_fitness" in dados
+                )
+                else 0,
+                "user_tag_profile": int(len(user_tag_profile))
+                if "interactions_fitness" in dados and "user_interests_fitness" in dados
+                else 0,
+            },
+        },
+    )
+    write_manifest(dados_dir, manifest)
 
     print("\nPreparação concluída.")
-    print(f"Artefatos em: {DADOS_DIR}")
+    print(f"Artefatos em: {dados_dir}")
 
 
 if __name__ == "__main__":

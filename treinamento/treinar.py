@@ -38,6 +38,8 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from progress_utils import StageProgress
+from dataset_context import DatasetContext, dataset_context, manifest_path
+from pipeline_contracts import split_signature_from_manifest_file
 from treinamento.model_utils import (
     DEFAULT_MODEL_DIR,
     merge_model_metadata,
@@ -46,9 +48,6 @@ from treinamento.model_utils import (
 )
 from treinamento.ranker_features import parse_tags
 
-DADOS_DIR = ROOT / "treinamento" / "dados"
-SPLITS_DIR = DADOS_DIR / "splits"
-OUTPUT_DIR = ROOT / "extracao_filtragem" / "output"
 TRAIN_POSTS_FILE = "train_posts.parquet"
 
 
@@ -64,14 +63,23 @@ def _require_parquet(path: Path, hint: str) -> pd.DataFrame:
     return pd.read_parquet(path)
 
 
-def _anexar_message_ids(posts: pd.DataFrame) -> pd.DataFrame:
+def _anexar_message_ids(posts: pd.DataFrame, output_dir: Path) -> pd.DataFrame:
     if "_message_id" in posts.columns:
         posts["_message_id"] = pd.to_numeric(
             posts["_message_id"], errors="coerce"
         ).astype("Int64")
+        if "message_id" not in posts.columns:
+            posts["message_id"] = posts["_message_id"]
         return posts
 
-    msgs_path = OUTPUT_DIR / "messages_fitness.parquet"
+    if "message_id" in posts.columns:
+        posts["message_id"] = pd.to_numeric(
+            posts["message_id"], errors="coerce"
+        ).astype("Int64")
+        posts["_message_id"] = posts["message_id"]
+        return posts
+
+    msgs_path = output_dir / "messages_fitness.parquet"
     if not msgs_path.exists():
         return posts
 
@@ -89,15 +97,18 @@ def _anexar_message_ids(posts: pd.DataFrame) -> pd.DataFrame:
 def carregar_catalogo_posts(
     usar_split_stats: bool,
     catalogo_completo: bool,
+    dados_dir: Path,
+    splits_dir: Path,
+    output_dir: Path,
 ) -> tuple[pd.DataFrame, str]:
     if usar_split_stats and not catalogo_completo:
-        caminho = SPLITS_DIR / TRAIN_POSTS_FILE
+        caminho = splits_dir / TRAIN_POSTS_FILE
         origem = "split de treino"
     elif usar_split_stats and catalogo_completo:
-        caminho = DADOS_DIR / "posts_metadata.parquet"
+        caminho = dados_dir / "posts_metadata.parquet"
         origem = "catálogo completo com estatísticas de treino"
     else:
-        caminho = DADOS_DIR / "posts_metadata.parquet"
+        caminho = dados_dir / "posts_metadata.parquet"
         origem = "dataset completo"
 
     posts = _require_parquet(
@@ -108,7 +119,7 @@ def carregar_catalogo_posts(
     )
     posts = posts.copy()
     posts["tags_fitness"] = posts["tags_fitness"].apply(_parse_tags)
-    posts = _anexar_message_ids(posts)
+    posts = _anexar_message_ids(posts, output_dir)
     return posts, origem
 
 
@@ -116,9 +127,10 @@ def carregar_posts_ajuste(
     usar_split_stats: bool,
     catalogo_posts: pd.DataFrame,
     catalogo_completo: bool,
+    splits_dir: Path,
 ) -> pd.DataFrame:
     if usar_split_stats and catalogo_completo:
-        caminho = SPLITS_DIR / TRAIN_POSTS_FILE
+        caminho = splits_dir / TRAIN_POSTS_FILE
         posts_fit = _require_parquet(caminho, "python treinamento/dividir_dataset.py")
         posts_fit = posts_fit.copy()
         posts_fit["tags_fitness"] = posts_fit["tags_fitness"].apply(_parse_tags)
@@ -126,22 +138,118 @@ def carregar_posts_ajuste(
     return catalogo_posts
 
 
+def _filter_known_tags(tags: list[str], vocab: set[str]) -> tuple[list[str], list[str]]:
+    known = [tag for tag in tags if tag in vocab]
+    unknown = [tag for tag in tags if tag not in vocab]
+    return known, unknown
+
+
+def _catalog_vocabulary_coverage(
+    posts_catalogo: pd.DataFrame,
+    vocab: set[str],
+) -> tuple[list[list[str]], dict[str, Any]]:
+    filtered_rows: list[list[str]] = []
+    catalog_unique_tags: set[str] = set()
+    oov_unique_tags: set[str] = set()
+    rows_with_oov = 0
+    rows_all_oov = 0
+    total_tags = 0
+    total_oov_tags = 0
+
+    for tags in posts_catalogo["tags_fitness"]:
+        tags_norm = _parse_tags(tags)
+        catalog_unique_tags.update(tags_norm)
+        total_tags += len(tags_norm)
+        known_tags, unknown_tags = _filter_known_tags(tags_norm, vocab)
+        if unknown_tags:
+            rows_with_oov += 1
+            total_oov_tags += len(unknown_tags)
+            oov_unique_tags.update(unknown_tags)
+        if tags_norm and not known_tags:
+            rows_all_oov += 1
+        filtered_rows.append(known_tags)
+
+    coverage = {
+        "catalog_unique_tags": int(len(catalog_unique_tags)),
+        "train_vocabulary_tags": int(len(vocab)),
+        "catalog_known_unique_tags": int(len(catalog_unique_tags - oov_unique_tags)),
+        "catalog_oov_unique_tags": int(len(oov_unique_tags)),
+        "catalog_rows_with_oov": int(rows_with_oov),
+        "catalog_rows_all_oov": int(rows_all_oov),
+        "catalog_rows_total": int(len(posts_catalogo)),
+        "catalog_tags_total": int(total_tags),
+        "catalog_oov_tags_total": int(total_oov_tags),
+        "catalog_oov_tag_rate": float(total_oov_tags / total_tags) if total_tags > 0 else 0.0,
+        "catalog_oov_examples": sorted(oov_unique_tags)[:20],
+    }
+    return filtered_rows, coverage
+
+
+def _query_vocabulary_coverage(splits_dir: Path, vocab: set[str]) -> dict[str, Any]:
+    query_paths = [
+        splits_dir / "val_interactions.parquet",
+        splits_dir / "test_interactions.parquet",
+    ]
+    queries_total = 0
+    queries_with_oov = 0
+    queries_all_oov = 0
+    unique_oov_tags: set[str] = set()
+
+    for path in query_paths:
+        if not path.exists():
+            continue
+        interactions = pd.read_parquet(path)
+        if "tags_fitness" not in interactions.columns:
+            continue
+        for tags in interactions["tags_fitness"].apply(_parse_tags):
+            if not tags:
+                continue
+            queries_total += 1
+            known_tags, unknown_tags = _filter_known_tags(tags, vocab)
+            if unknown_tags:
+                queries_with_oov += 1
+                unique_oov_tags.update(unknown_tags)
+            if tags and not known_tags:
+                queries_all_oov += 1
+
+    return {
+        "query_rows_total": int(queries_total),
+        "query_rows_with_oov": int(queries_with_oov),
+        "query_rows_all_oov": int(queries_all_oov),
+        "query_rows_with_oov_rate": float(queries_with_oov / queries_total)
+        if queries_total > 0
+        else 0.0,
+        "query_rows_all_oov_rate": float(queries_all_oov / queries_total)
+        if queries_total > 0
+        else 0.0,
+        "query_oov_examples": sorted(unique_oov_tags)[:20],
+    }
+
+
 def ajustar_vetorizador(
     posts_fit: pd.DataFrame, posts_catalogo: pd.DataFrame
-) -> tuple[MultiLabelBinarizer, np.ndarray]:
+) -> tuple[MultiLabelBinarizer, np.ndarray, set[str], dict[str, Any]]:
     """
     Ajusta MultiLabelBinarizer no conjunto de ajuste e transforma o catálogo.
     """
     mlb = MultiLabelBinarizer()
     mlb.fit(posts_fit["tags_fitness"])
-    post_matrix = mlb.transform(posts_catalogo["tags_fitness"]).astype(np.float32)
+    vocab = {str(tag) for tag in mlb.classes_}
+    filtered_tags, coverage = _catalog_vocabulary_coverage(posts_catalogo, vocab)
+    post_matrix = mlb.transform(filtered_tags).astype(np.float32)
     print(
         "  Vetorizador: "
         f"{len(mlb.classes_)} tags únicas, "
         f"ajustado em {len(posts_fit)} posts, "
         f"matriz do catálogo {post_matrix.shape}"
     )
-    return mlb, post_matrix
+    print(
+        "  Cobertura do vocabulário: "
+        f"{coverage['catalog_rows_with_oov']} posts com OOV, "
+        f"{coverage['catalog_rows_all_oov']} posts totalmente fora do vocabulário, "
+        f"taxa OOV={coverage['catalog_oov_tag_rate']:.2%}"
+    )
+    return mlb, post_matrix, vocab, coverage
 
 
 def construir_cooccurrence_map(
@@ -186,9 +294,12 @@ def _scores_por_contagem(posts_catalogo: pd.DataFrame, contagem: dict[str, int])
 
 
 def calcular_popularidade(
-    posts_catalogo: pd.DataFrame, usar_split_stats: bool = True
+    posts_catalogo: pd.DataFrame,
+    dados_dir: Path,
+    splits_dir: Path,
+    usar_split_stats: bool = True,
 ) -> np.ndarray:
-    inter_split_path = SPLITS_DIR / "train_interactions.parquet"
+    inter_split_path = splits_dir / "train_interactions.parquet"
     if usar_split_stats and inter_split_path.exists():
         inter_df = pd.read_parquet(inter_split_path)
         contagem = _contagem_tags_interacoes(inter_df)
@@ -196,7 +307,7 @@ def calcular_popularidade(
             return _scores_por_contagem(posts_catalogo, contagem)
         return np.ones(len(posts_catalogo), dtype=np.float32)
 
-    caminho_pop = DADOS_DIR / "interacoes_por_tag.parquet"
+    caminho_pop = dados_dir / "interacoes_por_tag.parquet"
     if not caminho_pop.exists():
         return np.ones(len(posts_catalogo), dtype=np.float32)
 
@@ -253,10 +364,14 @@ def _calcular_scores_sociais_por_catalogo(
 
 
 def carregar_scores_sociais(
-    posts_catalogo: pd.DataFrame, usar_split_stats: bool = True
+    posts_catalogo: pd.DataFrame,
+    output_dir: Path,
+    dados_dir: Path,
+    splits_dir: Path,
+    usar_split_stats: bool = True,
 ) -> np.ndarray:
     if usar_split_stats:
-        caminho = SPLITS_DIR / "train_social_scores.parquet"
+        caminho = splits_dir / "train_social_scores.parquet"
         if caminho.exists():
             ss_df = pd.read_parquet(caminho)
             if len(ss_df) == len(posts_catalogo):
@@ -267,8 +382,8 @@ def carregar_scores_sociais(
                     .values
                 )
 
-        inter_path = SPLITS_DIR / "train_interactions.parquet"
-        social_path = OUTPUT_DIR / "user_social_graph.parquet"
+        inter_path = splits_dir / "train_interactions.parquet"
+        social_path = output_dir / "user_social_graph.parquet"
         if inter_path.exists() and social_path.exists():
             return _calcular_scores_sociais_por_catalogo(
                 posts_catalogo,
@@ -279,7 +394,7 @@ def carregar_scores_sociais(
         print("  [AVISO] train_social_scores indisponível — social_scores zerados.")
         return np.zeros(len(posts_catalogo), dtype=np.float32)
 
-    caminho = DADOS_DIR / "social_scores.parquet"
+    caminho = dados_dir / "social_scores.parquet"
     if caminho.exists():
         ss_df = pd.read_parquet(caminho)
         if len(ss_df) == len(posts_catalogo):
@@ -290,8 +405,8 @@ def carregar_scores_sociais(
                 .values
             )
 
-    inter_path = OUTPUT_DIR / "interactions_fitness.parquet"
-    social_path = OUTPUT_DIR / "user_social_graph.parquet"
+    inter_path = output_dir / "interactions_fitness.parquet"
+    social_path = output_dir / "user_social_graph.parquet"
     if inter_path.exists() and social_path.exists():
         return _calcular_scores_sociais_por_catalogo(
             posts_catalogo,
@@ -303,9 +418,13 @@ def carregar_scores_sociais(
     return np.zeros(len(posts_catalogo), dtype=np.float32)
 
 
-def carregar_cooccurrence_df(usar_split_stats: bool) -> pd.DataFrame:
-    cooc_split_path = SPLITS_DIR / "train_tag_cooccurrence.parquet"
-    cooc_full_path = OUTPUT_DIR / "tag_cooccurrence.parquet"
+def carregar_cooccurrence_df(
+    output_dir: Path,
+    splits_dir: Path,
+    usar_split_stats: bool,
+) -> pd.DataFrame:
+    cooc_split_path = splits_dir / "train_tag_cooccurrence.parquet"
+    cooc_full_path = output_dir / "tag_cooccurrence.parquet"
 
     if usar_split_stats and cooc_split_path.exists():
         cooc_df = pd.read_parquet(cooc_split_path)
@@ -364,12 +483,17 @@ def salvar_metadata(
     posts_catalogo: pd.DataFrame,
     posts_fit: pd.DataFrame,
     mlb: MultiLabelBinarizer,
+    vocabulary_coverage: dict[str, Any],
     metadata_path: Path | None,
+    context: DatasetContext,
 ) -> None:
+    split_manifest = manifest_path(context.splits_dir)
+    split_sig = split_signature_from_manifest_file(split_manifest)
     payload: dict[str, Any] = {
         "id": args.experiment_id or model_dir.name,
         "family": "baseline_hibrido",
         "model_dir": rel_path(model_dir),
+        "dataset": context.to_metadata(),
         "training": {
             "origem": origem,
             "dataset_completo": bool(args.dataset_completo),
@@ -378,6 +502,13 @@ def salvar_metadata(
             "n_posts_catalogo": int(len(posts_catalogo)),
             "n_posts_fit": int(len(posts_fit)),
             "n_tags": int(len(mlb.classes_)),
+            "split_signature": split_sig,
+            "paths": {
+                "output_dir": rel_path(context.output_dir),
+                "dados_dir": rel_path(context.dados_dir),
+                "splits_dir": rel_path(context.splits_dir),
+            },
+            "vocabulary_coverage": vocabulary_coverage,
         },
         "params": {
             "excluir_tags_exatas": True,
@@ -439,6 +570,42 @@ Exemplos:
         default=None,
         help="Identificador lógico do experimento para metadata",
     )
+    parser.add_argument(
+        "--dataset-key",
+        type=str,
+        default=None,
+        help="Namespace lógico do dataset; se omitido, usa layout legado",
+    )
+    parser.add_argument(
+        "--dataset-path",
+        type=str,
+        default=None,
+        help="Caminho opcional do arquivo do dataset para registrar proveniência",
+    )
+    parser.add_argument(
+        "--scale-factor",
+        type=str,
+        default=None,
+        help="Scale factor opcional para registrar proveniência do dataset",
+    )
+    parser.add_argument(
+        "--output-dir",
+        type=str,
+        default=None,
+        help="Override opcional do diretório de extração",
+    )
+    parser.add_argument(
+        "--dados-dir",
+        type=str,
+        default=None,
+        help="Override opcional do diretório de dados preparados",
+    )
+    parser.add_argument(
+        "--splits-dir",
+        type=str,
+        default=None,
+        help="Override opcional do diretório de splits",
+    )
     args = parser.parse_args()
 
     if args.dataset_completo and args.catalogo_completo:
@@ -447,8 +614,39 @@ Exemplos:
     usar_split_stats = not args.dataset_completo
     model_dir = resolve_model_dir(args.model_dir)
     metadata_path = Path(args.metadata_path) if args.metadata_path else None
+    base_context = dataset_context(
+        dataset_key=args.dataset_key,
+        dataset_path=args.dataset_path,
+        scale_factor=args.scale_factor,
+    )
+    output_dir = Path(args.output_dir) if args.output_dir else base_context.output_dir
+    if not output_dir.is_absolute():
+        output_dir = (ROOT / output_dir).resolve()
+    dados_dir = Path(args.dados_dir) if args.dados_dir else base_context.dados_dir
+    if not dados_dir.is_absolute():
+        dados_dir = (ROOT / dados_dir).resolve()
+    splits_dir = Path(args.splits_dir) if args.splits_dir else base_context.splits_dir
+    if not splits_dir.is_absolute():
+        splits_dir = (ROOT / splits_dir).resolve()
+    runtime_context = DatasetContext(
+        dataset_key=base_context.dataset_key,
+        dataset_path=base_context.dataset_path,
+        scale_factor=base_context.scale_factor,
+        extraction_dir=base_context.extraction_dir,
+        output_dir=output_dir,
+        dados_dir=dados_dir,
+        splits_dir=splits_dir,
+        models_dir=model_dir.parent,
+        results_dir=base_context.results_dir,
+        is_legacy=base_context.is_legacy,
+    )
 
     print("=== Treinamento do modelo de recomendação ===\n")
+    print(f"Namespace ativo : {runtime_context.dataset_key or 'legado'}")
+    print(f"Output extração : {runtime_context.output_dir}")
+    print(f"Dados treino    : {runtime_context.dados_dir}")
+    print(f"Splits          : {runtime_context.splits_dir}")
+    print(f"Model dir       : {model_dir}\n")
     progress = StageProgress(
         total_stages=6,
         label=f"Treino {args.experiment_id or model_dir.name}",
@@ -458,6 +656,9 @@ Exemplos:
     posts_catalogo, origem = carregar_catalogo_posts(
         usar_split_stats=usar_split_stats,
         catalogo_completo=bool(args.catalogo_completo),
+        dados_dir=dados_dir,
+        splits_dir=splits_dir,
+        output_dir=output_dir,
     )
     print(f"  {len(posts_catalogo)} posts carregados ({origem})")
 
@@ -465,25 +666,33 @@ Exemplos:
         usar_split_stats=usar_split_stats,
         catalogo_posts=posts_catalogo,
         catalogo_completo=bool(args.catalogo_completo),
+        splits_dir=splits_dir,
     )
 
     print()
     progress.step("Ajustando vetorizador de tags")
-    mlb, post_matrix = ajustar_vetorizador(posts_fit, posts_catalogo)
+    mlb, post_matrix, vocab, vocabulary_coverage = ajustar_vetorizador(posts_fit, posts_catalogo)
+    vocabulary_coverage["query_coverage"] = _query_vocabulary_coverage(splits_dir, vocab)
 
     print()
     progress.step("Carregando co-ocorrência de tags")
-    cooc_df = carregar_cooccurrence_df(usar_split_stats)
+    cooc_df = carregar_cooccurrence_df(output_dir, splits_dir, usar_split_stats)
     cooccurrence_map = construir_cooccurrence_map(cooc_df)
 
     print()
     progress.step("Calculando popularidade")
-    popularidade = calcular_popularidade(posts_catalogo, usar_split_stats)
+    popularidade = calcular_popularidade(posts_catalogo, dados_dir, splits_dir, usar_split_stats)
     print(f"  Score médio de popularidade: {popularidade.mean():.4f}")
 
     print()
     progress.step("Carregando scores de influência social")
-    social_scores = carregar_scores_sociais(posts_catalogo, usar_split_stats)
+    social_scores = carregar_scores_sociais(
+        posts_catalogo,
+        output_dir,
+        dados_dir,
+        splits_dir,
+        usar_split_stats,
+    )
     n_nonzero = int((social_scores > 0).sum())
     print(
         "  Score médio de influência social: "
@@ -508,7 +717,9 @@ Exemplos:
         posts_catalogo=posts_catalogo,
         posts_fit=posts_fit,
         mlb=mlb,
+        vocabulary_coverage=vocabulary_coverage,
         metadata_path=metadata_path,
+        context=runtime_context,
     )
 
     print(f"\nTreinamento concluído. Artefatos em: {model_dir}")
@@ -524,6 +735,16 @@ Exemplos:
     print(f"  - social_scores.npy    : {len(social_scores)} valores")
     print(
         f"  - posts_cache.parquet  : {len(posts_catalogo)} posts (alinhado com post_matrix)"
+    )
+    print(
+        "  - cobertura OOV       : "
+        f"{vocabulary_coverage['catalog_rows_with_oov']} posts com OOV, "
+        f"{vocabulary_coverage['catalog_rows_all_oov']} totalmente OOV"
+    )
+    print(
+        "  - queries degradadas  : "
+        f"{vocabulary_coverage['query_coverage']['query_rows_with_oov']} com OOV, "
+        f"{vocabulary_coverage['query_coverage']['query_rows_all_oov']} totalmente OOV"
     )
 
 

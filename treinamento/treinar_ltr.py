@@ -101,9 +101,30 @@ def main() -> None:
     feature_columns = list(meta.get("feature_columns", []))
     if not feature_columns:
         raise ValueError("feature_columns não encontrado em ltr_dataset_meta.json")
+    split_consistente = bool(meta.get("split_consistente", False))
+    if meta.get("split_signature") and meta.get("base_model_split_signature") and not split_consistente:
+        raise ValueError(
+            "O dataset LTR foi preparado com split diferente do split usado no modelo base. "
+            "Regenere o dataset/modelo antes de treinar o LTR."
+        )
 
     if train_df.empty:
         raise ValueError("Dataset de treino LTR vazio.")
+
+    train_diag = meta.get("diagnostics", {}).get("train", {}) if isinstance(meta.get("diagnostics"), dict) else {}
+    val_diag = meta.get("diagnostics", {}).get("val", {}) if isinstance(meta.get("diagnostics"), dict) else {}
+    print(
+        "Diagnóstico dataset treino: "
+        f"{train_diag.get('queries_emitted', 0)} queries emitidas, "
+        f"{train_diag.get('queries_all_tags_oov', 0)} 100% OOV, "
+        f"{train_diag.get('queries_without_negatives', 0)} sem negativos."
+    )
+    print(
+        "Diagnóstico dataset val   : "
+        f"{val_diag.get('queries_emitted', 0)} queries emitidas, "
+        f"{val_diag.get('queries_all_tags_oov', 0)} 100% OOV, "
+        f"{val_diag.get('queries_without_negatives', 0)} sem negativos."
+    )
 
     X_train = train_df[feature_columns]
     y_train = train_df["label"].astype(int)
@@ -193,6 +214,8 @@ def main() -> None:
             "train_dataset": rel_path(train_dataset),
             "val_dataset": rel_path(val_dataset) if val_dataset.exists() else None,
             "feature_columns": feature_columns,
+            "split_signature": meta.get("split_signature"),
+            "split_consistente": split_consistente,
             "params": {
                 "objective": args.objective,
                 "metric_at": args.metric_at,
@@ -208,6 +231,7 @@ def main() -> None:
             "best_iteration": best_iteration,
             "tempo_treinamento_s": elapsed_s,
             "feature_importance_path": rel_path(importance_path),
+            "dataset_diagnostics": meta.get("diagnostics", {}),
         },
     }
     merge_model_metadata(model_dir, metadata_payload)

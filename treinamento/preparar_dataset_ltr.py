@@ -12,8 +12,10 @@ ROOT = Path(__file__).resolve().parent.parent
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
+from dataset_context import dataset_context, dataset_context_from_metadata, manifest_path
+from pipeline_contracts import split_signature_from_manifest_file, split_signature_from_metadata
 from progress_utils import IterationProgress, StageProgress
-from treinamento.model_utils import rel_path, resolve_model_dir, write_json
+from treinamento.model_utils import load_model_metadata, rel_path, resolve_model_dir, write_json
 from treinamento.ranker_features import (
     BaseArtifacts,
     build_categorical_maps,
@@ -21,8 +23,6 @@ from treinamento.ranker_features import (
     load_base_artifacts,
     parse_tags,
 )
-
-SPLITS_DIR = ROOT / "treinamento" / "dados" / "splits"
 
 DEFAULT_FEATURES = [
     "cosine_score",
@@ -74,8 +74,26 @@ def _timestamp_ms(value: Any) -> int | None:
         return None
 
 
-def _load_split_interactions(split_name: str) -> pd.DataFrame:
-    path = SPLITS_DIR / f"{split_name}_interactions.parquet"
+def _resolve_splits_dir(
+    model_dir: Path,
+    *,
+    splits_dir_override: str | None,
+    dataset_key: str | None,
+) -> Path:
+    if splits_dir_override:
+        path = Path(splits_dir_override)
+        return path if path.is_absolute() else (ROOT / path).resolve()
+
+    metadata = load_model_metadata(model_dir)
+    context = dataset_context_from_metadata(metadata)
+    if context is not None:
+        return context.splits_dir
+
+    return dataset_context(dataset_key=dataset_key).splits_dir
+
+
+def _load_split_interactions(split_name: str, splits_dir: Path) -> pd.DataFrame:
+    path = splits_dir / f"{split_name}_interactions.parquet"
     if not path.exists():
         raise FileNotFoundError(
             f"Arquivo ausente: {path}. Execute primeiro python treinamento/dividir_dataset.py"
@@ -116,8 +134,14 @@ def _sample_queries(
     posts_cache: pd.DataFrame,
     max_queries: int,
     rng: np.random.Generator,
-) -> list[dict[str, Any]]:
+) -> tuple[list[dict[str, Any]], dict[str, Any]]:
     queries: list[dict[str, Any]] = []
+    diagnostics: dict[str, Any] = {
+        "candidate_queries_total": 0,
+        "skipped_reference_outside_catalog": 0,
+        "skipped_without_future_in_catalog": 0,
+        "skipped_without_tags": 0,
+    }
     total_users = int(interactions["user_id"].nunique()) if "user_id" in interactions.columns else 0
     progress = IterationProgress(
         total=total_users,
@@ -136,8 +160,10 @@ def _sample_queries(
             continue
 
         for i, evento in enumerate(eventos[:-1]):
+            diagnostics["candidate_queries_total"] += 1
             ref_message_id = int(evento["message_id"])
             if ref_message_id not in message_to_rowpos:
+                diagnostics["skipped_reference_outside_catalog"] += 1
                 continue
 
             future_ids = {
@@ -146,11 +172,13 @@ def _sample_queries(
                 if int(item["message_id"]) in message_to_rowpos
             }
             if not future_ids:
+                diagnostics["skipped_without_future_in_catalog"] += 1
                 continue
 
             ref_row = posts_cache.iloc[message_to_rowpos[ref_message_id]]
             tags_ref = parse_tags(ref_row.get("tags_fitness", []))
             if not tags_ref:
+                diagnostics["skipped_without_tags"] += 1
                 continue
 
             timestamp_ref = _timestamp_ms(ref_row.get("creation_date"))
@@ -172,10 +200,14 @@ def _sample_queries(
     if total_users > 0:
         progress.finish(f"Queries candidatas geradas: {len(queries)}")
 
+    diagnostics["queries_before_sampling"] = int(len(queries))
     if max_queries > 0 and len(queries) > max_queries:
         sampled_idx = rng.choice(len(queries), size=max_queries, replace=False)
-        return [queries[int(idx)] for idx in sorted(sampled_idx)]
-    return queries
+        sampled_queries = [queries[int(idx)] for idx in sorted(sampled_idx)]
+        diagnostics["queries_after_sampling"] = int(len(sampled_queries))
+        return sampled_queries, diagnostics
+    diagnostics["queries_after_sampling"] = int(len(queries))
+    return queries, diagnostics
 
 
 def _build_query_rows(
@@ -187,11 +219,11 @@ def _build_query_rows(
     hard_negative_topn: int,
     max_queries: int,
     rng: np.random.Generator,
-) -> pd.DataFrame:
+) -> tuple[pd.DataFrame, dict[str, Any]]:
     posts_cache = artifacts.posts_cache
     message_to_rowpos = _build_message_to_rowpos(posts_cache)
     categorical_maps = build_categorical_maps(posts_cache)
-    queries = _sample_queries(
+    queries, sample_diagnostics = _sample_queries(
         split_name=split_name,
         interactions=interactions,
         message_to_rowpos=message_to_rowpos,
@@ -199,10 +231,25 @@ def _build_query_rows(
         max_queries=max_queries,
         rng=rng,
     )
+    diagnostics: dict[str, Any] = {
+        "split": split_name,
+        "catalog_size": int(len(posts_cache)),
+        **sample_diagnostics,
+        "queries_with_any_oov": 0,
+        "queries_with_partial_oov": 0,
+        "queries_all_tags_oov": 0,
+        "queries_without_candidates": 0,
+        "queries_without_positives": 0,
+        "queries_without_negatives": 0,
+        "queries_emitted": 0,
+        "positive_rows": 0,
+        "negative_rows": 0,
+    }
 
     if not queries:
         print(f"[Linhas LTR {split_name}] 0/0 (100 %) - Nenhuma query disponível")
-        return pd.DataFrame()
+        diagnostics["total_rows"] = 0
+        return pd.DataFrame(), diagnostics
 
     rows: list[dict[str, Any]] = []
     progress = IterationProgress(
@@ -219,17 +266,31 @@ def _build_query_rows(
             timestamp_entrada=query["timestamp_ref"],
             categorical_maps=categorical_maps,
         )
+        coverage = features_df.attrs.get("query_coverage", {})
+        unknown_count = int(coverage.get("unknown_count", 0))
+        if unknown_count > 0:
+            diagnostics["queries_with_any_oov"] += 1
+        if bool(coverage.get("partial_oov", False)):
+            diagnostics["queries_with_partial_oov"] += 1
+        if bool(coverage.get("all_tags_oov", False)):
+            diagnostics["queries_all_tags_oov"] += 1
+            progress.log(query_id + 1)
+            continue
 
         features_df = features_df[features_df["candidate_message_id"] >= 0].copy()
         features_df = features_df[
             features_df["candidate_message_id"] != query["query_message_id"]
         ].copy()
         if features_df.empty:
+            diagnostics["queries_without_candidates"] += 1
+            progress.log(query_id + 1)
             continue
 
         positive_mask = features_df["candidate_message_id"].isin(query["future_ids"])
         positives = features_df[positive_mask].copy()
         if positives.empty:
+            diagnostics["queries_without_positives"] += 1
+            progress.log(query_id + 1)
             continue
 
         negatives = features_df[~positive_mask].copy()
@@ -239,6 +300,10 @@ def _build_query_rows(
         if negatives_per_query > 0 and len(negatives) > negatives_per_query:
             sampled = rng.choice(len(negatives), size=negatives_per_query, replace=False)
             negatives = negatives.iloc[np.sort(sampled)].copy()
+        if negatives.empty:
+            diagnostics["queries_without_negatives"] += 1
+            progress.log(query_id + 1)
+            continue
 
         for label, frame in [(1, positives), (0, negatives)]:
             for item in frame.itertuples(index=False):
@@ -256,10 +321,27 @@ def _build_query_rows(
                     row[feature] = float(getattr(item, feature))
                 rows.append(row)
 
+        diagnostics["queries_emitted"] += 1
+        diagnostics["positive_rows"] += int(len(positives))
+        diagnostics["negative_rows"] += int(len(negatives))
         progress.log(query_id + 1)
 
     progress.finish(f"Linhas geradas: {len(rows)}")
-    return pd.DataFrame(rows)
+    diagnostics["total_rows"] = int(len(rows))
+    if diagnostics["queries_emitted"] > 0:
+        diagnostics["avg_positive_per_query"] = float(
+            diagnostics["positive_rows"] / diagnostics["queries_emitted"]
+        )
+        diagnostics["avg_negative_per_query"] = float(
+            diagnostics["negative_rows"] / diagnostics["queries_emitted"]
+        )
+    else:
+        diagnostics["avg_positive_per_query"] = 0.0
+        diagnostics["avg_negative_per_query"] = 0.0
+    diagnostics["positive_rate"] = float(
+        diagnostics["positive_rows"] / diagnostics["total_rows"]
+    ) if diagnostics["total_rows"] > 0 else 0.0
+    return pd.DataFrame(rows), diagnostics
 
 
 def main() -> None:
@@ -289,6 +371,18 @@ def main() -> None:
         type=str,
         default=None,
         help="Arquivo JSON com schema e estatísticas do dataset LTR",
+    )
+    parser.add_argument(
+        "--dataset-key",
+        type=str,
+        default=None,
+        help="Namespace lógico do dataset; usado como fallback quando o metadata não informa",
+    )
+    parser.add_argument(
+        "--splits-dir",
+        type=str,
+        default=None,
+        help="Override opcional do diretório de splits",
     )
     parser.add_argument(
         "--features",
@@ -324,6 +418,11 @@ def main() -> None:
     args = parser.parse_args()
 
     model_dir = resolve_model_dir(args.model_dir)
+    splits_dir = _resolve_splits_dir(
+        model_dir,
+        splits_dir_override=args.splits_dir,
+        dataset_key=args.dataset_key,
+    )
     train_out = _resolve_output_path(args.train_out, model_dir / "ltr_train.parquet")
     val_out = _resolve_output_path(args.val_out, model_dir / "ltr_val.parquet")
     meta_out = _resolve_output_path(args.meta_out, model_dir / "ltr_dataset_meta.json")
@@ -338,15 +437,16 @@ def main() -> None:
     message_to_rowpos = _build_message_to_rowpos(artifacts.posts_cache)
     print(f"  Catálogo disponível: {len(artifacts.posts_cache)} posts")
     print(f"  Mapeamentos message_id: {len(message_to_rowpos)}")
+    print(f"  Splits utilizados    : {splits_dir}")
 
     rng = np.random.default_rng(args.seed)
 
     print()
     progress.step("Construindo dataset LTR de treino")
-    train_df = _build_query_rows(
+    train_df, train_diag = _build_query_rows(
         split_name="train",
         artifacts=artifacts,
-        interactions=_load_split_interactions("train"),
+        interactions=_load_split_interactions("train", splits_dir),
         features_enabled=args.features,
         negatives_per_query=args.negatives_per_query,
         hard_negative_topn=args.hard_negative_topn,
@@ -356,10 +456,10 @@ def main() -> None:
 
     print()
     progress.step("Construindo dataset LTR de validação")
-    val_df = _build_query_rows(
+    val_df, val_diag = _build_query_rows(
         split_name="val",
         artifacts=artifacts,
-        interactions=_load_split_interactions("val"),
+        interactions=_load_split_interactions("val", splits_dir),
         features_enabled=args.features,
         negatives_per_query=args.negatives_per_query,
         hard_negative_topn=args.hard_negative_topn,
@@ -375,10 +475,22 @@ def main() -> None:
     val_df.to_parquet(val_out, index=False)
 
     categorical_maps = build_categorical_maps(artifacts.posts_cache)
+    current_split_signature = split_signature_from_manifest_file(
+        manifest_path(splits_dir)
+    )
+    base_model_split_signature = split_signature_from_metadata(artifacts.metadata)
     metadata = {
         "model_dir": rel_path(model_dir),
+        "splits_dir": rel_path(splits_dir),
         "train_dataset": rel_path(train_out),
         "val_dataset": rel_path(val_out),
+        "split_signature": current_split_signature,
+        "base_model_split_signature": base_model_split_signature,
+        "split_consistente": (
+            bool(current_split_signature)
+            and bool(base_model_split_signature)
+            and current_split_signature == base_model_split_signature
+        ),
         "feature_columns": list(args.features),
         "categorical_maps": categorical_maps,
         "config": {
@@ -396,6 +508,10 @@ def main() -> None:
             "train_positive_rate": float(train_df["label"].mean()) if not train_df.empty else 0.0,
             "val_positive_rate": float(val_df["label"].mean()) if not val_df.empty else 0.0,
         },
+        "diagnostics": {
+            "train": train_diag,
+            "val": val_diag,
+        },
     }
     write_json(meta_out, metadata)
 
@@ -403,6 +519,18 @@ def main() -> None:
     print(f"Treino: {train_out} ({len(train_df)} linhas)")
     print(f"Val   : {val_out} ({len(val_df)} linhas)")
     print(f"Meta  : {meta_out}")
+    print(
+        "Diagnóstico treino: "
+        f"{train_diag['queries_emitted']} queries emitidas, "
+        f"{train_diag['queries_all_tags_oov']} queries 100% OOV, "
+        f"{train_diag['queries_without_negatives']} sem negativos."
+    )
+    print(
+        "Diagnóstico val   : "
+        f"{val_diag['queries_emitted']} queries emitidas, "
+        f"{val_diag['queries_all_tags_oov']} queries 100% OOV, "
+        f"{val_diag['queries_without_negatives']} sem negativos."
+    )
 
 
 if __name__ == "__main__":

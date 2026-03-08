@@ -15,12 +15,15 @@ from treinamento.model_utils import (
 )
 from treinamento.ranker_features import (
     BaseArtifacts,
+    build_query_coverage,
     build_feature_frame,
     has_user_profile,
+    known_vocabulary,
     load_base_artifacts,
     normalize_query_tags,
     score_cooccurrence,
     score_cosine,
+    score_cosine_known_tags,
     score_popularidade,
     score_social,
     score_time_decay,
@@ -58,6 +61,7 @@ class BaseRanker:
         self.metadata: dict[str, Any] = {}
         self.artifacts: BaseArtifacts | None = None
         self._feature_schema: dict[str, Any] = {}
+        self.last_query_info: dict[str, Any] = {}
 
     def carregar(self) -> "BaseRanker":
         raise NotImplementedError
@@ -166,7 +170,7 @@ class WeightedHybridRanker(BaseRanker):
     def _score_cooccurrence(self, tags_entrada: list[str]) -> np.ndarray:
         return score_cooccurrence(
             self._cooccurrence_map,
-            set(self._vectorizer.classes_),
+            known_vocabulary(self._vectorizer),
             self._posts["tags_fitness"],
             tags_entrada,
         )
@@ -196,8 +200,26 @@ class WeightedHybridRanker(BaseRanker):
         if peso_popularidade == PESO_POPULARIDADE:
             peso_popularidade = self.peso_popularidade_default
         tags_norm = normalize_query_tags(tags)
-        sc = self._score_cosine(tags_norm)
-        si = self._score_cooccurrence(tags_norm)
+        coverage = build_query_coverage(self._vectorizer, tags_norm)
+        self.last_query_info = {
+            "family": self.family,
+            "tags": list(tags_norm),
+            "known_tags": list(coverage.known_tags),
+            "unknown_tags": list(coverage.unknown_tags),
+            "all_tags_oov": bool(coverage.all_tags_oov),
+            "partial_oov": bool(coverage.partial_oov),
+            "coverage_ratio": float(coverage.coverage_ratio),
+        }
+        sc = (
+            score_cosine_known_tags(
+                self._vectorizer,
+                self._post_matrix,
+                coverage.known_tags,
+            )
+            if coverage.known_tags
+            else np.zeros(len(self._posts), dtype=np.float32)
+        )
+        si = self._score_cooccurrence(coverage.known_tags)
         st = self._score_time_decay(timestamp)
         ss = self._score_social()
         usar_personalizacao = self._tem_perfil_usuario(user_id)
@@ -283,6 +305,16 @@ class WeightedHybridRanker(BaseRanker):
         ).head(top_k)
 
         if include_internal:
+            if self.last_query_info:
+                resultado["_query_oov_count"] = int(
+                    len(self.last_query_info.get("unknown_tags", []))
+                )
+                resultado["_query_all_oov"] = bool(
+                    self.last_query_info.get("all_tags_oov", False)
+                )
+                resultado["_query_coverage_ratio"] = float(
+                    self.last_query_info.get("coverage_ratio", 0.0)
+                )
             return resultado.reset_index(drop=False)
 
         colunas_saida = [
@@ -383,6 +415,13 @@ class LightGBMLTRRanker(BaseRanker):
         ).head(top_k)
 
         if include_internal:
+            coverage = features_df.attrs.get("query_coverage", {})
+            if coverage:
+                resultado["_query_oov_count"] = int(coverage.get("unknown_count", 0))
+                resultado["_query_all_oov"] = bool(coverage.get("all_tags_oov", False))
+                resultado["_query_coverage_ratio"] = float(
+                    coverage.get("coverage_ratio", 0.0)
+                )
             return resultado.reset_index(drop=False)
 
         colunas_saida = [

@@ -14,63 +14,72 @@ Modo demo (`--demo`):
 from __future__ import annotations
 
 import argparse
-import ast
 import json
-from dataclasses import dataclass
 from pathlib import Path
 import sys
 
 import numpy as np
-import pandas as pd
 
 ROOT = Path(__file__).resolve().parent.parent
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
+from avaliacao.offline_protocol import (
+    OfflineQuery,
+    build_future_queries,
+    load_split_interactions,
+    resolve_dataset_dirs,
+)
+from dataset_context import manifest_path
+from pipeline_contracts import split_signature_from_manifest_file, split_signature_from_metadata
 from progress_utils import IterationProgress
-SPLITS_DIR = ROOT / "treinamento" / "dados" / "splits"
+from treinamento.model_utils import load_model_metadata
 
 
-@dataclass
-class Query:
-    tags: list[str]
-    timestamp: int
+def carregar_queries(
+    modelo,
+    splits_dir: Path,
+    output_dir: Path,
+    max_queries: int = 200,
+    split_name: str = "val",
+    seed: int = 42,
+) -> list[OfflineQuery]:
+    interactions = load_split_interactions(splits_dir, split_name)
+    queries = build_future_queries(modelo, interactions, output_dir)
+    if max_queries > 0 and len(queries) > max_queries:
+        rng = np.random.default_rng(seed)
+        idx = rng.choice(len(queries), size=max_queries, replace=False)
+        return [queries[int(i)] for i in np.sort(idx)]
+    return queries
 
 
-def _parse_tags(value) -> list[str]:
-    if isinstance(value, (list, np.ndarray)):
-        return [str(t) for t in value]
-    if isinstance(value, str):
-        try:
-            parsed = ast.literal_eval(value)
-            return [str(t) for t in parsed] if isinstance(parsed, list) else [value]
-        except Exception:
-            return [value]
-    return []
+def precision_at_k(relevantes: set[int], recomendados: list[int], k: int) -> float:
+    if k <= 0:
+        return 0.0
+    rec_k = recomendados[:k]
+    if not rec_k:
+        return 0.0
+    hits = sum(1 for item in rec_k if item in relevantes)
+    return hits / k
 
 
-def carregar_queries(max_queries: int = 200) -> list[Query]:
-    caminho = SPLITS_DIR / "val_interactions.parquet"
-    if not caminho.exists():
-        raise FileNotFoundError(f"Arquivo ausente: {caminho}")
-
-    df = pd.read_parquet(caminho)
-    df = df.copy()
-    df["tags_fitness"] = df["tags_fitness"].apply(_parse_tags)
-    df = df[df["tags_fitness"].map(len) > 0]
-    if len(df) == 0:
-        return []
-
-    df = df.sample(n=min(max_queries, len(df)), random_state=42)
-    return [Query(tags=row.tags_fitness, timestamp=int(row.timestamp)) for row in df.itertuples()]
+def ndcg_at_k(relevantes: set[int], recomendados: list[int], k: int) -> float:
+    gains = np.array([1.0 if item in relevantes else 0.0 for item in recomendados[:k]], dtype=np.float32)
+    if gains.size == 0:
+        return 0.0
+    discounts = 1.0 / np.log2(np.arange(2, gains.size + 2))
+    dcg = float((gains * discounts).sum())
+    ideal = np.array([1.0] * min(len(relevantes), k), dtype=np.float32)
+    idcg = float((ideal * discounts).sum())
+    return dcg / idcg if idcg > 0 else 0.0
 
 
-def precision_at_k(rels: list[float], k: int) -> float:
+def precision_from_rels(rels: list[float], k: int) -> float:
     arr = np.array(rels[:k], dtype=np.float32)
     return float((arr > 0).mean()) if len(arr) else 0.0
 
 
-def ndcg_at_k(rels: list[float], k: int) -> float:
+def ndcg_from_rels(rels: list[float], k: int) -> float:
     gains = np.array(rels[:k], dtype=np.float32)
     if gains.size == 0:
         return 0.0
@@ -81,7 +90,7 @@ def ndcg_at_k(rels: list[float], k: int) -> float:
     return dcg / idcg if idcg > 0 else 0.0
 
 
-def avaliar_real(modelo, queries: list[Query], peso_popularidade: float, k: int) -> dict[str, float]:
+def avaliar_real(modelo, queries: list[OfflineQuery], peso_popularidade: float, k: int) -> dict[str, float]:
     precisions, ndcgs = [], []
     progress = IterationProgress(
         total=len(queries),
@@ -93,21 +102,23 @@ def avaliar_real(modelo, queries: list[Query], peso_popularidade: float, k: int)
 
     for idx, q in enumerate(queries, start=1):
         df = modelo.recommend_df(
-            tags=q.tags,
-            timestamp=q.timestamp,
+            tags=q.reference_tags,
+            timestamp=q.reference_timestamp_ms,
             top_k=k,
             excluir_tags_exatas=False,
             peso_popularidade=peso_popularidade,
+            include_internal=True,
         )
-        query_tags = set(q.tags)
-        rels = []
-        for tags_post in df.get("tags_fitness", []).tolist() if not df.empty else []:
-            tags_post_set = set(tags_post if isinstance(tags_post, list) else _parse_tags(tags_post))
-            inter = len(query_tags.intersection(tags_post_set))
-            uni = max(len(query_tags.union(tags_post_set)), 1)
-            rels.append(inter / uni)
-        precisions.append(precision_at_k(rels, k))
-        ndcgs.append(ndcg_at_k(rels, k))
+        rec_ids = []
+        if not df.empty and "_message_id" in df.columns:
+            rec_ids = (
+                df["_message_id"]
+                .dropna()
+                .astype("int64")
+                .tolist()
+            )
+        precisions.append(precision_at_k(q.future_ids, rec_ids, k))
+        ndcgs.append(ndcg_at_k(q.future_ids, rec_ids, k))
         if queries:
             progress.log(idx)
 
@@ -145,8 +156,8 @@ def avaliar_demo(peso_popularidade: float, k: int, n_queries: int = 200) -> tupl
             score = 0.35 * cosine + 0.25 * cooc + 0.15 * time_decay + 0.15 * social + weight_pop * popularity + noise
             top_idx = np.argsort(score)[::-1][:k]
             rels = rel_true[top_idx].tolist()
-            precisions.append(precision_at_k(rels, k))
-            ndcgs.append(ndcg_at_k(rels, k))
+            precisions.append(precision_from_rels(rels, k))
+            ndcgs.append(ndcg_from_rels(rels, k))
             if n_queries > 0:
                 progress.log(idx + 1)
 
@@ -173,21 +184,77 @@ def main() -> None:
         default="treinamento/modelo",
         help="Diretório do modelo baseline a ser avaliado",
     )
+    parser.add_argument(
+        "--dataset-key",
+        type=str,
+        default=None,
+        help="Namespace lógico do dataset; usado como fallback quando o metadata não informa",
+    )
+    parser.add_argument(
+        "--splits-dir",
+        type=str,
+        default=None,
+        help="Override opcional do diretório de splits",
+    )
+    parser.add_argument(
+        "--output-dir",
+        type=str,
+        default=None,
+        help="Override opcional do diretório de parquets extraídos",
+    )
     args = parser.parse_args()
 
     if args.demo:
         antes, depois = avaliar_demo(args.peso_depois, args.k, args.max_queries)
         modo = "demo"
+        metadata_extra = {}
     else:
         from treinamento.recomendar import ModeloRecomendacao
-        modelo = ModeloRecomendacao(args.model_dir).carregar()
-        queries = carregar_queries(max_queries=args.max_queries)
+        model_dir = Path(args.model_dir)
+        if not model_dir.is_absolute():
+            model_dir = (ROOT / model_dir).resolve()
+        splits_dir, output_dir = resolve_dataset_dirs(
+            model_dir,
+            args.dataset_key,
+            args.splits_dir,
+            args.output_dir,
+        )
+        modelo = ModeloRecomendacao(model_dir).carregar()
+        queries = carregar_queries(
+            modelo,
+            splits_dir,
+            output_dir,
+            max_queries=args.max_queries,
+            split_name="val",
+            seed=42,
+        )
         antes = avaliar_real(modelo, queries, 0.0, args.k)
         depois = avaliar_real(modelo, queries, args.peso_depois, args.k)
         modo = "real"
+        split_sig = split_signature_from_manifest_file(manifest_path(splits_dir))
+        model_split_sig = split_signature_from_metadata(load_model_metadata(model_dir))
+        metadata_extra = {
+            "split_name": "val",
+            "splits_dir": str(splits_dir),
+            "output_dir": str(output_dir),
+            "split_signature": split_sig,
+            "model_split_signature": model_split_sig,
+            "split_consistente": bool(split_sig) and bool(model_split_sig) and split_sig == model_split_sig,
+        }
 
     delta = {ch: round(depois[ch] - antes[ch], 6) for ch in antes if ch.startswith("precision") or ch.startswith("ndcg")}
-    resultado = {"modo": modo, "config": {"k": args.k, "peso_antes": 0.0, "peso_depois": args.peso_depois}, "antes": antes, "depois": depois, "delta": delta}
+    resultado = {
+        "modo": modo,
+        "config": {
+            "k": args.k,
+            "peso_antes": 0.0,
+            "peso_depois": args.peso_depois,
+        },
+        "metadata": metadata_extra,
+        "antes": antes,
+        "depois": depois,
+        "delta": delta,
+    }
 
     out = ROOT / args.out_json
     out.parent.mkdir(parents=True, exist_ok=True)

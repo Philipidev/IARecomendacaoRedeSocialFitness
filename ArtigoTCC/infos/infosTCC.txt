@@ -1,0 +1,19 @@
+RESUMO:
+-> ver se pode falar mais da IA 
+-> as frases finais com os resultados de desempenho e smart nudges não sei se a gnt continua falando sobre isso
+
+ABSTRACT:
+-> só traduzir o resumo e colar
+
+INTRODUÇÃO:
+-> o 3º paragrafo eh onde eu to dando ênfase na IA e no nosso objetivo principal do trabalho. Da uma olhada e ve se pode falar alguma coisa mais especifica da IA em si
+-> 4º parafrago mesma coisa. as vezes da pra refazer o 4º colocando mais infos e carac da IA e manter o 3º do jeito que ta
+-> 5º paragrafo to achando deboas acho que se a gnt já falou da IA nos 2 antes, não precisa repetir. avalia e ve se muda algo
+
+FUNDAMENTOS TEORICOS:
+-> no 2.2 que é sobre Gamificacao em saúde digital, vamo ter que tirar e colocar outro assunto, já que não vamos mais focar no app
+-> o 2.1 já é sobre a IA mas acho que vale a pena rever tudo e explicar melhor, relacionadno com as métricas que a gnt vai usar
+
+
+
+

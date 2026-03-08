@@ -2,7 +2,7 @@
 Otimização dos pesos do score híbrido da recomendação.
 
 Fluxo:
-  1) Carrega dados de validação (treinamento/dados/splits/val_*)
+  1) Carrega queries do split de validação (protocolo offline por interações futuras)
   2) Carrega artefatos do modelo via ModeloRecomendacao
   3) Executa Grid Search com restrição:
        w_cos + w_cooc + w_time + w_social = 1.0 e w_i >= 0
@@ -12,10 +12,9 @@ Fluxo:
   7) Exporta melhor configuração em treinamento/modelo/pesos_otimos.json
 
 Métrica alvo (NDCG@K):
-  Para cada post de validação usado como consulta, os candidatos recomendados
-  recebem ganho pela similaridade Jaccard entre tags da consulta e tags do post
-  recomendado. O DCG da lista prevista é comparado ao DCG ideal (ordenação por
-  ganho real), gerando NDCG em [0, 1].
+  Usa o mesmo protocolo da avaliação offline principal: cada interação de validação
+  vira item de referência, e o ground truth é o conjunto de interações futuras reais
+  do mesmo usuário ainda presentes no catálogo do modelo.
 """
 
 from __future__ import annotations
@@ -35,11 +34,18 @@ ROOT = Path(__file__).resolve().parent.parent
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
+from avaliacao.offline_protocol import (
+    OfflineQuery,
+    build_future_queries,
+    load_split_interactions,
+    resolve_dataset_dirs,
+)
+from dataset_context import manifest_path
+from pipeline_contracts import split_signature_from_manifest_file, split_signature_from_metadata
 from progress_utils import IterationProgress
-from treinamento.model_utils import resolve_model_dir
+from treinamento.model_utils import load_model_metadata, resolve_model_dir
 from treinamento.recomendar import MODELO_DIR, ModeloRecomendacao
 
-SPLITS_DIR = ROOT / "treinamento" / "dados" / "splits"
 RESULTADOS_PATH = ROOT / "avaliacao" / "resultados" / "pesos_experimentos.csv"
 PESOS_OTIMOS_PATH = MODELO_DIR / "pesos_otimos.json"
 
@@ -52,52 +58,9 @@ class ResultadoPesos:
     w_social: float
     ndcg_at_k: float
     precision_at_k: float
-    avg_jaccard_at_k: float
+    recall_at_k: float
     cobertura_top_k: float
     avaliadas: int
-
-
-def _parse_tags(value) -> list[str]:
-    if isinstance(value, list):
-        return [str(v) for v in value]
-    if isinstance(value, np.ndarray):
-        return [str(v) for v in value.tolist()]
-    if isinstance(value, str):
-        txt = value.strip()
-        if txt.startswith("[") and txt.endswith("]"):
-            try:
-                parsed = json.loads(txt.replace("'", '"'))
-                if isinstance(parsed, list):
-                    return [str(v) for v in parsed]
-            except Exception:
-                pass
-        return [txt]
-    return []
-
-
-def carregar_validacao() -> pd.DataFrame:
-    val_files = sorted(SPLITS_DIR.glob("val_*.parquet"))
-    if not val_files:
-        raise FileNotFoundError(
-            f"Nenhum arquivo val_*.parquet encontrado em {SPLITS_DIR}. "
-            "Execute primeiro: python treinamento/dividir_dataset.py"
-        )
-
-    val_posts = SPLITS_DIR / "val_posts.parquet"
-    if not val_posts.exists():
-        raise FileNotFoundError(
-            f"Arquivo obrigatório ausente: {val_posts}. "
-            "Gere os splits com python treinamento/dividir_dataset.py"
-        )
-
-    df_val = pd.read_parquet(val_posts)
-    if "tags_fitness" not in df_val.columns or "creation_date" not in df_val.columns:
-        raise ValueError("val_posts.parquet deve conter colunas tags_fitness e creation_date.")
-
-    df_val = df_val.copy()
-    df_val["tags_fitness"] = df_val["tags_fitness"].apply(_parse_tags)
-    df_val = df_val[df_val["tags_fitness"].apply(bool)]
-    return df_val.reset_index(drop=True)
 
 
 def gerar_combinacoes_grid(passo: float) -> list[tuple[float, float, float, float]]:
@@ -143,28 +106,62 @@ def random_vizinhos_dirichlet(
     return [tuple(float(round(v, 8)) for v in row) for row in draws]
 
 
-def _jaccard(a: set[str], b: set[str]) -> float:
-    if not a or not b:
-        return 0.0
-    inter = len(a & b)
-    uni = len(a | b)
-    return inter / uni if uni > 0 else 0.0
+def carregar_validacao(
+    modelo,
+    splits_dir: Path,
+    output_dir: Path,
+    max_queries: int,
+    seed: int,
+) -> list[OfflineQuery]:
+    interactions = load_split_interactions(splits_dir, "val")
+    queries = build_future_queries(modelo, interactions, output_dir)
+    if max_queries > 0 and len(queries) > max_queries:
+        idx = np.random.default_rng(seed).choice(
+            len(queries),
+            size=max_queries,
+            replace=False,
+        )
+        return [queries[int(i)] for i in np.sort(idx)]
+    return queries
 
 
-def _dcg(rels: np.ndarray) -> float:
-    if rels.size == 0:
+def _precision_at_k(relevantes: set[int], recomendados: list[int], k: int) -> float:
+    if k <= 0:
         return 0.0
-    discounts = 1.0 / np.log2(np.arange(2, rels.size + 2))
-    return float(np.sum(rels * discounts))
+    rec_k = recomendados[:k]
+    if not rec_k:
+        return 0.0
+    hits = sum(1 for item in rec_k if item in relevantes)
+    return hits / k
+
+
+def _recall_at_k(relevantes: set[int], recomendados: list[int], k: int) -> float:
+    if not relevantes:
+        return 0.0
+    rec_k = recomendados[:k]
+    hits = sum(1 for item in rec_k if item in relevantes)
+    return hits / len(relevantes)
+
+
+def _ndcg_at_k(relevantes: set[int], recomendados: list[int], k: int) -> float:
+    gains = np.array(
+        [1.0 if item in relevantes else 0.0 for item in recomendados[:k]],
+        dtype=np.float64,
+    )
+    if gains.size == 0:
+        return 0.0
+    discounts = 1.0 / np.log2(np.arange(2, gains.size + 2))
+    dcg = float(np.sum(gains * discounts))
+    ideal = np.array([1.0] * min(len(relevantes), k), dtype=np.float64)
+    idcg = float(np.sum(ideal * discounts[: len(ideal)]))
+    return (dcg / idcg) if idcg > 0 else 0.0
 
 
 def avaliar_pesos(
     modelo: ModeloRecomendacao,
-    validacao: pd.DataFrame,
+    validacao: list[OfflineQuery],
     pesos: tuple[float, float, float, float],
     top_k: int,
-    max_queries: int,
-    rng: np.random.Generator,
 ) -> ResultadoPesos:
     w_cos, w_cooc, w_time, w_social = pesos
     if any(w < 0 for w in pesos):
@@ -172,49 +169,36 @@ def avaliar_pesos(
     if not math.isclose(sum(pesos), 1.0, rel_tol=0, abs_tol=1e-6):
         raise ValueError("Pesos inválidos: soma deve ser 1.0.")
 
-    if max_queries > 0 and len(validacao) > max_queries:
-        idx = rng.choice(len(validacao), size=max_queries, replace=False)
-        consultas = validacao.iloc[np.sort(idx)]
-    else:
-        consultas = validacao
-
     ndcgs: list[float] = []
     precisions: list[float] = []
-    avg_jaccards: list[float] = []
+    recalls: list[float] = []
     all_recomendados: set[int] = set()
+    catalog_message_ids = (
+        pd.to_numeric(modelo._posts["_message_id"], errors="coerce")
+        .fillna(-1)
+        .astype("int64")
+        .to_numpy()
+    )
 
-    for _, row in consultas.iterrows():
-        tags_q = [t.strip() for t in row["tags_fitness"] if str(t).strip()]
-        if not tags_q:
-            continue
-
-        sc = modelo._score_cosine(tags_q)
-        si = modelo._score_cooccurrence(tags_q)
-        st = modelo._score_time_decay(int(row["creation_date"]))
+    for query in validacao:
+        sc = modelo._score_cosine(query.reference_tags)
+        si = modelo._score_cooccurrence(query.reference_tags)
+        st = modelo._score_time_decay(query.reference_timestamp_ms)
         ss = modelo._score_social()
 
         score = w_cos * sc + w_cooc * si + w_time * st + w_social * ss
         ordem = np.argsort(-score)
         top_idx = ordem[:top_k]
         all_recomendados.update(top_idx.tolist())
+        rec_ids = [
+            int(catalog_message_ids[i])
+            for i in top_idx
+            if i < len(catalog_message_ids) and int(catalog_message_ids[i]) >= 0
+        ]
 
-        tags_query_set = set(tags_q)
-        gains = np.array(
-            [_jaccard(tags_query_set, set(modelo._posts.iloc[i]["tags_fitness"])) for i in top_idx],
-            dtype=np.float64,
-        )
-        ideal = np.sort(gains)[::-1]
-
-        dcg = _dcg(gains)
-        idcg = _dcg(ideal)
-        ndcg = (dcg / idcg) if idcg > 0 else 0.0
-
-        prec = float(np.mean(gains > 0)) if gains.size else 0.0
-        avg_j = float(np.mean(gains)) if gains.size else 0.0
-
-        ndcgs.append(ndcg)
-        precisions.append(prec)
-        avg_jaccards.append(avg_j)
+        ndcgs.append(_ndcg_at_k(query.future_ids, rec_ids, top_k))
+        precisions.append(_precision_at_k(query.future_ids, rec_ids, top_k))
+        recalls.append(_recall_at_k(query.future_ids, rec_ids, top_k))
 
     cobertura = len(all_recomendados) / len(modelo._posts) if len(modelo._posts) else 0.0
 
@@ -225,7 +209,7 @@ def avaliar_pesos(
         w_social=w_social,
         ndcg_at_k=float(np.mean(ndcgs)) if ndcgs else 0.0,
         precision_at_k=float(np.mean(precisions)) if precisions else 0.0,
-        avg_jaccard_at_k=float(np.mean(avg_jaccards)) if avg_jaccards else 0.0,
+        recall_at_k=float(np.mean(recalls)) if recalls else 0.0,
         cobertura_top_k=float(cobertura),
         avaliadas=len(ndcgs),
     )
@@ -241,6 +225,8 @@ def salvar_melhor_peso(
     top_k: int,
     grid_step: float,
     random_search: int,
+    split_signature: str | None,
+    model_split_signature: str | None,
     pesos_path: Path,
 ) -> None:
     pesos_path.parent.mkdir(parents=True, exist_ok=True)
@@ -253,8 +239,11 @@ def salvar_melhor_peso(
         "metric_target_value": float(linha["ndcg_at_k"]),
         "top_k": int(top_k),
         "otimizacao": {
+            "protocol": "offline_future_interactions_val",
             "grid_step": grid_step,
             "random_search_amostras": random_search,
+            "split_signature": split_signature,
+            "model_split_signature": model_split_signature,
             "timestamp_utc": datetime.now(timezone.utc).isoformat(),
         },
     }
@@ -288,10 +277,34 @@ def main() -> None:
         default=None,
         help="Arquivo JSON opcional para salvar os pesos ótimos",
     )
+    parser.add_argument(
+        "--dataset-key",
+        type=str,
+        default=None,
+        help="Namespace lógico do dataset; usado como fallback quando o metadata não informa",
+    )
+    parser.add_argument(
+        "--splits-dir",
+        type=str,
+        default=None,
+        help="Override opcional do diretório de splits",
+    )
+    parser.add_argument(
+        "--output-dir",
+        type=str,
+        default=None,
+        help="Override opcional do diretório de parquets extraídos",
+    )
     args = parser.parse_args()
 
     rng = np.random.default_rng(args.seed)
     model_dir = resolve_model_dir(args.model_dir)
+    splits_dir, output_dir = resolve_dataset_dirs(
+        model_dir,
+        args.dataset_key,
+        args.splits_dir,
+        args.output_dir,
+    )
     out_csv = Path(args.out_csv)
     if not out_csv.is_absolute():
         out_csv = ROOT / out_csv
@@ -299,12 +312,20 @@ def main() -> None:
     if not pesos_path.is_absolute():
         pesos_path = ROOT / pesos_path
 
-    print("Carregando dados de validação...")
-    validacao = carregar_validacao()
-    print(f"  Consultas válidas: {len(validacao)}")
-
     print("Carregando artefatos do modelo...")
     modelo = ModeloRecomendacao(model_dir).carregar()
+
+    print("Carregando dados de validação...")
+    validacao = carregar_validacao(
+        modelo,
+        splits_dir,
+        output_dir,
+        args.max_queries,
+        args.seed,
+    )
+    print(f"  Consultas válidas: {len(validacao)}")
+    print(f"  Splits utilizados: {splits_dir}")
+    print(f"  Output utilizado : {output_dir}")
 
     print("Executando Grid Search...")
     combinacoes = gerar_combinacoes_grid(args.grid_step)
@@ -326,8 +347,6 @@ def main() -> None:
                 validacao=validacao,
                 pesos=pesos,
                 top_k=args.top_k,
-                max_queries=args.max_queries,
-                rng=rng,
             )
         )
         if combinacoes:
@@ -375,8 +394,6 @@ def main() -> None:
                     validacao=validacao,
                     pesos=pesos,
                     top_k=args.top_k,
-                    max_queries=args.max_queries,
-                    rng=rng,
                 )
             )
             random_progress.log(idx)
@@ -390,7 +407,7 @@ def main() -> None:
 
     df_res["sum_w"] = df_res[["w_cos", "w_cooc", "w_time", "w_social"]].sum(axis=1)
     df_res = df_res.sort_values(
-        by=["ndcg_at_k", "precision_at_k", "avg_jaccard_at_k", "cobertura_top_k"],
+        by=["ndcg_at_k", "precision_at_k", "recall_at_k", "cobertura_top_k"],
         ascending=False,
     ).reset_index(drop=True)
 
@@ -401,6 +418,8 @@ def main() -> None:
         top_k=args.top_k,
         grid_step=args.grid_step,
         random_search=args.random_search,
+        split_signature=split_signature_from_manifest_file(manifest_path(splits_dir)),
+        model_split_signature=split_signature_from_metadata(load_model_metadata(model_dir)),
         pesos_path=pesos_path,
     )
 
@@ -411,7 +430,7 @@ def main() -> None:
     )
     print(f"NDCG@{args.top_k}: {melhor['ndcg_at_k']:.4f}")
     print(f"Precision@{args.top_k}: {melhor['precision_at_k']:.4f}")
-    print(f"Avg Jaccard@{args.top_k}: {melhor['avg_jaccard_at_k']:.4f}")
+    print(f"Recall@{args.top_k}: {melhor['recall_at_k']:.4f}")
     print(f"Resultados salvos em: {out_csv}")
     print(f"Pesos ótimos exportados em: {pesos_path}")
 

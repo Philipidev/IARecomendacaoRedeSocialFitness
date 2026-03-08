@@ -6,33 +6,74 @@ Gera dataset de interações (likes, criação, reply) para treinamento de IA.
 
 import argparse
 import csv
+import json
 import os
+import re
+import shutil
 import subprocess
 import sys
+import unicodedata
+from collections import Counter
 from pathlib import Path
+from typing import Any
 
 import duckdb
+
+ROOT = Path(__file__).resolve().parent.parent
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+
+from dataset_context import (
+    DATASET_ARCHIVES_DIR,
+    DatasetContext,
+    build_stage_manifest,
+    dataset_context,
+    ensure_context_dirs,
+    rel_path,
+    write_manifest,
+)
+from pipeline_contracts import timestamp_to_ms
 
 
 # --- Configuração (paths relativos ao script) ---
 _SCRIPT_DIR = Path(__file__).resolve().parent
-_PROJECT_ROOT = _SCRIPT_DIR.parent
 EXTRACAO_DIR = _SCRIPT_DIR
 LDBC_SNB_DIR = EXTRACAO_DIR / "ldbc_snb"
 OUTPUT_DIR = EXTRACAO_DIR / "output"
-TREINAMENTO_DIR = _PROJECT_ROOT / "treinamento"
-DATASET_DIR = EXTRACAO_DIR / "dataset"
+TREINAMENTO_DIR = ROOT / "treinamento"
+DATASET_DIR = DATASET_ARCHIVES_DIR
 DEFAULT_DATASET = DATASET_DIR / "social_network-sf0.1-CsvBasic-LongDateFormatter.tar.zst"
 
 TAGCLASS_FITNESS_KEYWORDS = [
     "sports", "health", "fitness", "running", "exercise", "gym", "athletic",
 ]
-TAG_FITNESS_KEYWORDS = [
-    "treino", "academia", "corrida", "run", "running", "gym", "fitness",
-    "workout", "marathon", "hiit", "crossfit", "musculação", "musculacao",
-    "exercise", "sport", "sports", "treino", "correr", "jogging", "yoga",
-    "pilates", "bodybuilding", "cardio", "weight", "lifting",
-]
+TAG_FITNESS_NAME_TOKENS = {
+    "treino",
+    "academia",
+    "corrida",
+    "running",
+    "gym",
+    "fitness",
+    "workout",
+    "marathon",
+    "hiit",
+    "crossfit",
+    "musculacao",
+    "exercise",
+    "correr",
+    "jogging",
+    "yoga",
+    "pilates",
+    "bodybuilding",
+    "cardio",
+    "lifting",
+}
+TAG_FITNESS_NAME_PHRASES = {
+    "weight lifting",
+    "workout plan",
+}
+FITNESS_TAG_AUDIT_JSON = "fitness_tag_audit.json"
+FITNESS_TAG_AUDIT_CSV = "fitness_tag_audit.csv"
 
 
 def log(msg: str) -> None:
@@ -44,24 +85,124 @@ def q(col: str) -> str:
     return f'"{col}"' if col and "." in col else (col or "")
 
 
+def _normalize_text(value: Any) -> str:
+    text = unicodedata.normalize("NFKD", str(value or ""))
+    text = text.encode("ascii", "ignore").decode("ascii")
+    text = text.lower()
+    text = re.sub(r"[_\-/]+", " ", text)
+    text = re.sub(r"[^a-z0-9 ]+", " ", text)
+    return re.sub(r"\s+", " ", text).strip()
 
-def ensure_dirs() -> None:
-    """Cria pastas extracao_filtragem/dataset, ldbc_snb, output e treinamento."""
-    DATASET_DIR.mkdir(parents=True, exist_ok=True)
-    LDBC_SNB_DIR.mkdir(parents=True, exist_ok=True)
-    OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+
+def _tokens_from_text(value: Any) -> set[str]:
+    normalized = _normalize_text(value)
+    return {token for token in normalized.split() if token}
+
+
+def _matches_name_rules(name: str) -> list[str]:
+    normalized = _normalize_text(name)
+    tokens = _tokens_from_text(name)
+    reasons: list[str] = []
+
+    for token in sorted(TAG_FITNESS_NAME_TOKENS):
+        if token in tokens:
+            reasons.append(f"tag_name_token:{token}")
+
+    for phrase in sorted(TAG_FITNESS_NAME_PHRASES):
+        if phrase in normalized:
+            reasons.append(f"tag_name_phrase:{phrase}")
+
+    return reasons
+
+
+def _pick_column(
+    cols: list[str],
+    *,
+    exact: list[str] | None = None,
+    contains: list[str] | None = None,
+    fallback_idx: int = 0,
+) -> str:
+    lowered = {col.lower(): col for col in cols}
+    for candidate in exact or []:
+        if candidate in lowered:
+            return lowered[candidate]
+
+    for token in contains or []:
+        match = next((col for col in cols if token in col.lower()), None)
+        if match is not None:
+            return match
+
+    return cols[fallback_idx]
+
+
+def _describe_columns(con: duckdb.DuckDBPyConnection, table: str) -> list[str]:
+    return [col[0] for col in con.execute(f"DESCRIBE {table}").fetchall()]
+
+
+def _write_tag_audit(context: DatasetContext, audit_payload: dict[str, Any]) -> tuple[Path, Path]:
+    json_path = context.output_dir / FITNESS_TAG_AUDIT_JSON
+    csv_path = context.output_dir / FITNESS_TAG_AUDIT_CSV
+    json_path.write_text(
+        json.dumps(audit_payload, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+
+    rows = audit_payload.get("selected_tags", [])
+    with csv_path.open("w", encoding="utf-8", newline="") as f:
+        writer = csv.DictWriter(
+            f,
+            fieldnames=[
+                "tag_id",
+                "tag_name",
+                "normalized_name",
+                "tagclass_id",
+                "tagclass_name",
+                "selection_mode",
+                "reasons",
+            ],
+        )
+        writer.writeheader()
+        for row in rows if isinstance(rows, list) else []:
+            if not isinstance(row, dict):
+                continue
+            writer.writerow(
+                {
+                    "tag_id": row.get("tag_id"),
+                    "tag_name": row.get("tag_name"),
+                    "normalized_name": row.get("normalized_name"),
+                    "tagclass_id": row.get("tagclass_id"),
+                    "tagclass_name": row.get("tagclass_name"),
+                    "selection_mode": row.get("selection_mode"),
+                    "reasons": ";".join(row.get("reasons", [])),
+                }
+            )
+
+    return json_path, csv_path
+
+
+
+def ensure_dirs(context: DatasetContext) -> None:
+    """Cria pastas necessárias para o dataset ativo."""
+    ensure_context_dirs(context)
     TREINAMENTO_DIR.mkdir(parents=True, exist_ok=True)
-    log(f"Pastas criadas: {DATASET_DIR}, {OUTPUT_DIR}, {TREINAMENTO_DIR}")
+    log(
+        "Pastas criadas: "
+        f"{DATASET_DIR}, {context.extraction_dir}, {context.output_dir}, {TREINAMENTO_DIR}"
+    )
 
 
-def extract_archive(dataset_path: Path) -> Path:
+def extract_archive(dataset_path: Path, extraction_dir: Path) -> Path:
     """Extrai .tar.zst com zstd + tar. Retorna o diretório base dos CSVs."""
     if not dataset_path.exists():
         raise FileNotFoundError(f"Dataset não encontrado: {dataset_path}")
 
-    log(f"Extraindo {dataset_path} para {LDBC_SNB_DIR}...")
+    if extraction_dir.exists():
+        shutil.rmtree(extraction_dir)
+    extraction_dir.mkdir(parents=True, exist_ok=True)
+
+    log(f"Extraindo {dataset_path} para {extraction_dir}...")
     zstd_cmd = ["zstd", "-d", "-c", str(dataset_path)]
-    tar_cmd = ["tar", "-xf", "-", "-C", str(LDBC_SNB_DIR)]
+    tar_cmd = ["tar", "-xf", "-", "-C", str(extraction_dir)]
 
     try:
         p1 = subprocess.Popen(zstd_cmd, stdout=subprocess.PIPE)
@@ -76,7 +217,7 @@ def extract_archive(dataset_path: Path) -> Path:
         ) from e
 
     log("Extração concluída.")
-    return LDBC_SNB_DIR
+    return extraction_dir
 
 
 def discover_csv_files(base: Path) -> dict[str, list[Path]]:
@@ -190,66 +331,142 @@ def load_tables_flexible(con: duckdb.DuckDBPyConnection, mapping: dict) -> None:
             log(f"  Erro {tbl}: {e}")
 
 
-def get_tag_fitness_ids(con: duckdb.DuckDBPyConnection) -> list[int]:
-    """Estratégia A: TagClass fitness + descendentes. Fallback B: Tags por nome."""
-    tag_ids: set[int] = set()
+def get_tag_fitness_selection(
+    con: duckdb.DuckDBPyConnection,
+) -> tuple[list[int], dict[str, Any]]:
+    """Seleciona tags fitness com TagClass + regras estritas por nome."""
+    tagclass_rows: list[dict[str, Any]] = []
+    selected_tagclass_ids: set[int] = set()
+    selected_tag_ids: set[int] = set()
+    selected_tags: list[dict[str, Any]] = []
 
-    # Estratégia A: TagClass
     try:
-        cols = [c[0] for c in con.execute("DESCRIBE tagclass").fetchall()]
-        id_col = "id" if "id" in [c.lower() for c in cols] else cols[0]
-        name_col = "name" if "name" in [c.lower() for c in cols] else next((c for c in cols if "name" in c.lower()), cols[1])
-        sub_col = next((c for c in cols if "subclass" in c.lower() or "parent" in c.lower()), None)
-
-        tc_conditions = " OR ".join(
-            f"LOWER({name_col}) LIKE '%{kw}%'" for kw in TAGCLASS_FITNESS_KEYWORDS
+        cols = _describe_columns(con, "tagclass")
+        id_col = _pick_column(cols, exact=["id"], contains=["id"], fallback_idx=0)
+        name_col = _pick_column(cols, exact=["name"], contains=["name"], fallback_idx=1)
+        parent_col = next(
+            (
+                col
+                for col in cols
+                if "subclass" in col.lower() or "parent" in col.lower()
+            ),
+            None,
         )
-        tc_ids = con.execute(f"""
-            SELECT {id_col} FROM tagclass WHERE {tc_conditions}
-        """).fetchall()
-        tc_ids = {r[0] for r in tc_ids}
 
-        if sub_col and tc_ids:
-            # Expandir descendentes
-            while True:
-                extra = con.execute(f"""
-                    SELECT {id_col} FROM tagclass
-                    WHERE {sub_col} IN ({','.join(map(str, tc_ids))})
-                    AND {id_col} NOT IN ({','.join(map(str, tc_ids))})
-                """).fetchall()
-                if not extra:
-                    break
-                tc_ids.update(r[0] for r in extra)
+        select_cols = [q(id_col), q(name_col)]
+        if parent_col is not None:
+            select_cols.append(q(parent_col))
+        raw_rows = con.execute(
+            f"SELECT {', '.join(select_cols)} FROM tagclass"
+        ).fetchall()
 
-        if tc_ids:
-            tag_cols = [c[0] for c in con.execute("DESCRIBE tag").fetchall()]
-            tc_fk = next((c for c in tag_cols if "tagclass" in c.lower() or "type" in c.lower()), "hasType_TagClass")
-            tag_ids.update(
-                r[0] for r in con.execute(
-                    f"SELECT id FROM tag WHERE {tc_fk} IN ({','.join(map(str, tc_ids))})"
-                ).fetchall()
+        by_id: dict[int, dict[str, Any]] = {}
+        for row in raw_rows:
+            tagclass_id = int(row[0])
+            name = str(row[1])
+            parent_id = int(row[2]) if parent_col is not None and row[2] is not None else None
+            reasons = [
+                f"tagclass_token:{token}"
+                for token in TAGCLASS_FITNESS_KEYWORDS
+                if token in _tokens_from_text(name)
+            ]
+            payload = {
+                "tagclass_id": tagclass_id,
+                "tagclass_name": name,
+                "parent_tagclass_id": parent_id,
+                "normalized_name": _normalize_text(name),
+                "seed_reasons": reasons,
+            }
+            tagclass_rows.append(payload)
+            by_id[tagclass_id] = payload
+            if reasons:
+                selected_tagclass_ids.add(tagclass_id)
+
+        if parent_col is not None and selected_tagclass_ids:
+            changed = True
+            while changed:
+                changed = False
+                for row in tagclass_rows:
+                    parent_id = row["parent_tagclass_id"]
+                    tagclass_id = row["tagclass_id"]
+                    if parent_id in selected_tagclass_ids and tagclass_id not in selected_tagclass_ids:
+                        selected_tagclass_ids.add(tagclass_id)
+                        changed = True
+
+        tag_cols = _describe_columns(con, "tag")
+        tag_id_col = _pick_column(tag_cols, exact=["id"], contains=["id"], fallback_idx=0)
+        tag_name_col = _pick_column(tag_cols, exact=["name"], contains=["name"], fallback_idx=1)
+        tagclass_fk = next(
+            (col for col in tag_cols if "tagclass" in col.lower() or "type" in col.lower()),
+            None,
+        )
+
+        tag_select_cols = [q(tag_id_col), q(tag_name_col)]
+        if tagclass_fk is not None:
+            tag_select_cols.append(q(tagclass_fk))
+        raw_tags = con.execute(f"SELECT {', '.join(tag_select_cols)} FROM tag").fetchall()
+
+        for row in raw_tags:
+            tag_id = int(row[0])
+            tag_name = str(row[1])
+            tagclass_id = int(row[2]) if tagclass_fk is not None and row[2] is not None else None
+
+            reasons = _matches_name_rules(tag_name)
+            if tagclass_id in selected_tagclass_ids:
+                tagclass_name = by_id.get(tagclass_id, {}).get("tagclass_name", "")
+                reasons.append(f"tagclass:{tagclass_name}")
+
+            if not reasons:
+                continue
+
+            reason_set = sorted(set(reasons))
+            selection_mode = "both" if any(r.startswith("tagclass:") for r in reason_set) and any(
+                r.startswith("tag_name_") for r in reason_set
+            ) else ("tagclass" if any(r.startswith("tagclass:") for r in reason_set) else "tag_name")
+
+            selected_tag_ids.add(tag_id)
+            selected_tags.append(
+                {
+                    "tag_id": tag_id,
+                    "tag_name": tag_name,
+                    "normalized_name": _normalize_text(tag_name),
+                    "tagclass_id": tagclass_id,
+                    "tagclass_name": by_id.get(tagclass_id, {}).get("tagclass_name"),
+                    "selection_mode": selection_mode,
+                    "reasons": reason_set,
+                }
             )
-    except Exception as e:
-        log(f"  Estratégia A (TagClass) falhou: {e}")
+    except Exception as exc:
+        raise RuntimeError(f"Falha ao selecionar tags fitness: {exc}") from exc
 
-    # Estratégia B: Tags por nome
-    try:
-        tag_name_col = "name"
-        for kw in TAG_FITNESS_KEYWORDS:
-            rows = con.execute(
-                f"SELECT id FROM tag WHERE LOWER({tag_name_col}) LIKE '%{kw}%'"
-            ).fetchall()
-            tag_ids.update(r[0] for r in rows)
-    except Exception as e:
-        log(f"  Estratégia B (Tag nome) parcial: {e}")
+    selected_tags = sorted(selected_tags, key=lambda item: (str(item["tag_name"]), int(item["tag_id"])))
+    selection_mode_counts = Counter(item["selection_mode"] for item in selected_tags)
+    audit_payload = {
+        "config": {
+            "tagclass_keywords": sorted(TAGCLASS_FITNESS_KEYWORDS),
+            "tag_name_tokens": sorted(TAG_FITNESS_NAME_TOKENS),
+            "tag_name_phrases": sorted(TAG_FITNESS_NAME_PHRASES),
+        },
+        "summary": {
+            "selected_tagclasses": int(len(selected_tagclass_ids)),
+            "selected_tags": int(len(selected_tag_ids)),
+            "selected_via_tagclass": int(selection_mode_counts.get("tagclass", 0)),
+            "selected_via_name": int(selection_mode_counts.get("tag_name", 0)),
+            "selected_via_both": int(selection_mode_counts.get("both", 0)),
+        },
+        "selected_tagclasses": sorted(
+            [row for row in tagclass_rows if row["tagclass_id"] in selected_tagclass_ids],
+            key=lambda item: str(item["tagclass_name"]),
+        ),
+        "selected_tags": selected_tags,
+    }
+    return sorted(selected_tag_ids), audit_payload
 
-    return list(tag_ids)
 
-
-def run_pipeline(dataset_path: Path) -> None:
+def run_pipeline(dataset_path: Path, context: DatasetContext) -> None:
     """Executa o pipeline completo."""
-    ensure_dirs()
-    base = extract_archive(dataset_path)
+    ensure_dirs(context)
+    base = extract_archive(dataset_path, context.extraction_dir)
     mapping = discover_csv_files(base)
 
     log("Arquivos descobertos:")
@@ -278,16 +495,17 @@ def run_pipeline(dataset_path: Path) -> None:
 
     # Tags fitness
     log("Aplicando filtro fitness...")
-    tag_fitness_ids = get_tag_fitness_ids(con)
+    tag_fitness_ids, tag_audit = get_tag_fitness_selection(con)
+    audit_json_path, audit_csv_path = _write_tag_audit(context, tag_audit)
     log(f"  Tags fitness: {len(tag_fitness_ids)}")
+    log(f"  Auditoria JSON: {audit_json_path}")
+    log(f"  Auditoria CSV : {audit_csv_path}")
 
     if not tag_fitness_ids:
-        log("AVISO: Nenhuma tag fitness encontrada. Usando todas as tags para mensagens.")
-        tag_fitness_ids = [r[0] for r in con.execute("SELECT id FROM tag").fetchall()]
-
-    if not tag_fitness_ids:
-        log("ERRO: Nenhuma tag disponível. Verifique os arquivos Tag e TagClass.")
-        sys.exit(1)
+        raise RuntimeError(
+            "Nenhuma tag fitness encontrada com os filtros estritos. "
+            "Verifique a auditoria de tags e ajuste as regras antes de prosseguir."
+        )
 
     con.execute("CREATE TEMP TABLE tag_fitness_ids AS SELECT unnest(?) AS id", [tag_fitness_ids])
 
@@ -342,11 +560,12 @@ def run_pipeline(dataset_path: Path) -> None:
         if msg_id not in message_ids:
             return
         tags = msg_tag_map.get(msg_id, [])
+        ts_ms = timestamp_to_ms(ts)
         interactions.append({
             "user_id": user_id,
             "message_id": msg_id,
             "event_type": event_type,
-            "timestamp": str(ts),
+            "timestamp": ts_ms,
             "tags_fitness": tags,
         })
 
@@ -447,7 +666,7 @@ def run_pipeline(dataset_path: Path) -> None:
             "user_id": [x["user_id"] for x in interactions],
             "message_id": [x["message_id"] for x in interactions],
             "event_type": [x["event_type"] for x in interactions],
-            "timestamp": [x["timestamp"] for x in interactions],
+            "timestamp": pa.array([x["timestamp"] for x in interactions], type=pa.int64()),
             "tags_fitness": arr,
         })
     else:
@@ -455,11 +674,11 @@ def run_pipeline(dataset_path: Path) -> None:
             "user_id": pa.array([], type=pa.int64()),
             "message_id": pa.array([], type=pa.int64()),
             "event_type": pa.array([], type=pa.string()),
-            "timestamp": pa.array([], type=pa.string()),
+            "timestamp": pa.array([], type=pa.int64()),
             "tags_fitness": pa.array([], type=pa.list_(pa.string())),
         })
-    pq.write_table(tbl_inter, OUTPUT_DIR / "interactions_fitness.parquet")
-    log(f"Exportado: {OUTPUT_DIR / 'interactions_fitness.parquet'}")
+    pq.write_table(tbl_inter, context.output_dir / "interactions_fitness.parquet")
+    log(f"Exportado: {context.output_dir / 'interactions_fitness.parquet'}")
 
     # messages_fitness.parquet — enriquecido com creation_date, content_length, language, forum_id
     msg_rows: list[dict] = []
@@ -501,7 +720,7 @@ def run_pipeline(dataset_path: Path) -> None:
             msg_rows.append({
                 "message_id": mid,
                 "message_type": "post",
-                "creation_date": str(row[1]),
+                "creation_date": timestamp_to_ms(row[1]),
                 "content_length": int(row[p_idx["len"]]) if p_idx["len"] is not None else None,
                 "language": str(row[p_idx["lang"]]) if p_idx["lang"] is not None else None,
                 "forum_id": forum_of_post.get(mid),
@@ -526,7 +745,7 @@ def run_pipeline(dataset_path: Path) -> None:
             msg_rows.append({
                 "message_id": mid,
                 "message_type": "comment",
-                "creation_date": str(row[1]),
+                "creation_date": timestamp_to_ms(row[1]),
                 "content_length": int(row[c_len_idx]) if c_len_idx is not None else None,
                 "language": None,
                 "forum_id": None,
@@ -544,11 +763,12 @@ def run_pipeline(dataset_path: Path) -> None:
                 "tags_fitness": msg_tag_map.get(mid, []),
             })
 
+    msg_rows = sorted(msg_rows, key=lambda row: int(row["message_id"]))
     if msg_rows:
         tbl_msg = pa.table({
             "message_id": [r["message_id"] for r in msg_rows],
             "message_type": [r["message_type"] for r in msg_rows],
-            "creation_date": [r["creation_date"] for r in msg_rows],
+            "creation_date": pa.array([r["creation_date"] for r in msg_rows], type=pa.int64()),
             "content_length": pa.array([r["content_length"] for r in msg_rows], type=pa.int64()),
             "language": [r["language"] for r in msg_rows],
             "forum_id": pa.array([r["forum_id"] for r in msg_rows], type=pa.int64()),
@@ -558,14 +778,14 @@ def run_pipeline(dataset_path: Path) -> None:
         tbl_msg = pa.table({
             "message_id": pa.array([], type=pa.int64()),
             "message_type": pa.array([], type=pa.string()),
-            "creation_date": pa.array([], type=pa.string()),
+            "creation_date": pa.array([], type=pa.int64()),
             "content_length": pa.array([], type=pa.int64()),
             "language": pa.array([], type=pa.string()),
             "forum_id": pa.array([], type=pa.int64()),
             "tags_fitness": pa.array([], type=pa.list_(pa.string())),
         })
-    pq.write_table(tbl_msg, OUTPUT_DIR / "messages_fitness.parquet")
-    log(f"Exportado: {OUTPUT_DIR / 'messages_fitness.parquet'} ({len(msg_rows)} linhas)")
+    pq.write_table(tbl_msg, context.output_dir / "messages_fitness.parquet")
+    log(f"Exportado: {context.output_dir / 'messages_fitness.parquet'} ({len(msg_rows)} linhas)")
 
     # tags_fitness.parquet
     tag_rows = con.execute("""
@@ -581,8 +801,8 @@ def run_pipeline(dataset_path: Path) -> None:
             "tag_id": pa.array([], type=pa.int64()),
             "tag_name": pa.array([], type=pa.string()),
         })
-    pq.write_table(tbl_tag, OUTPUT_DIR / "tags_fitness.parquet")
-    log(f"Exportado: {OUTPUT_DIR / 'tags_fitness.parquet'}")
+    pq.write_table(tbl_tag, context.output_dir / "tags_fitness.parquet")
+    log(f"Exportado: {context.output_dir / 'tags_fitness.parquet'}")
 
     # user_interests_fitness.parquet
     interest_rows: list[tuple] = []
@@ -612,8 +832,11 @@ def run_pipeline(dataset_path: Path) -> None:
             "tag_id": pa.array([], type=pa.int64()),
             "tag_name": pa.array([], type=pa.string()),
         })
-    pq.write_table(tbl_interests, OUTPUT_DIR / "user_interests_fitness.parquet")
-    log(f"Exportado: {OUTPUT_DIR / 'user_interests_fitness.parquet'} ({len(interest_rows)} linhas)")
+    pq.write_table(tbl_interests, context.output_dir / "user_interests_fitness.parquet")
+    log(
+        f"Exportado: {context.output_dir / 'user_interests_fitness.parquet'} "
+        f"({len(interest_rows)} linhas)"
+    )
 
     # user_social_graph.parquet — pares onde ao menos 1 participou de interações fitness
     social_rows: list[tuple] = []
@@ -648,8 +871,8 @@ def run_pipeline(dataset_path: Path) -> None:
             "friend_id": pa.array([], type=pa.int64()),
             "since": pa.array([], type=pa.string()),
         })
-    pq.write_table(tbl_social, OUTPUT_DIR / "user_social_graph.parquet")
-    log(f"Exportado: {OUTPUT_DIR / 'user_social_graph.parquet'} ({len(social_rows)} linhas)")
+    pq.write_table(tbl_social, context.output_dir / "user_social_graph.parquet")
+    log(f"Exportado: {context.output_dir / 'user_social_graph.parquet'} ({len(social_rows)} linhas)")
 
     # tag_cooccurrence.parquet — pares de tags que aparecem juntas nos messages fitness
     cooc_rows: list[tuple] = []
@@ -705,8 +928,49 @@ def run_pipeline(dataset_path: Path) -> None:
             "tag_b": pa.array([], type=pa.string()),
             "cooccurrences": pa.array([], type=pa.int64()),
         })
-    pq.write_table(tbl_cooc, OUTPUT_DIR / "tag_cooccurrence.parquet")
-    log(f"Exportado: {OUTPUT_DIR / 'tag_cooccurrence.parquet'} ({len(cooc_rows)} pares)")
+    pq.write_table(tbl_cooc, context.output_dir / "tag_cooccurrence.parquet")
+    log(f"Exportado: {context.output_dir / 'tag_cooccurrence.parquet'} ({len(cooc_rows)} pares)")
+
+    manifest = build_stage_manifest(
+        stage="extracao",
+        context=context,
+        extra={
+            "dataset_path_resolved": rel_path(dataset_path),
+            "output_files": [
+                "interactions_fitness.parquet",
+                "messages_fitness.parquet",
+                "tags_fitness.parquet",
+                "user_interests_fitness.parquet",
+                "user_social_graph.parquet",
+                "tag_cooccurrence.parquet",
+                FITNESS_TAG_AUDIT_JSON,
+                FITNESS_TAG_AUDIT_CSV,
+            ],
+            "summary": {
+                "tags_fitness": int(len(tag_fitness_ids)),
+                "messages_fitness": int(len(message_ids)),
+                "interacoes": int(len(interactions)),
+                "user_interests_fitness": int(len(interest_rows)),
+                "user_social_graph": int(len(social_rows)),
+                "tag_cooccurrence_pairs": int(len(cooc_rows)),
+                "tag_filter_selected_via_tagclass": int(
+                    tag_audit["summary"].get("selected_via_tagclass", 0)
+                ),
+                "tag_filter_selected_via_name": int(
+                    tag_audit["summary"].get("selected_via_name", 0)
+                ),
+                "tag_filter_selected_via_both": int(
+                    tag_audit["summary"].get("selected_via_both", 0)
+                ),
+            },
+            "tag_filter_audit": {
+                "json": rel_path(audit_json_path),
+                "csv": rel_path(audit_csv_path),
+            },
+        },
+    )
+    manifest_path = write_manifest(context.output_dir, manifest)
+    log(f"Manifesto do dataset salvo: {manifest_path}")
 
     con.close()
 
@@ -728,8 +992,18 @@ def main() -> None:
         default=Path(os.environ.get("LDBC_DATASET_PATH", str(DEFAULT_DATASET))),
         help="Caminho do arquivo .tar.zst",
     )
+    parser.add_argument(
+        "--dataset-key",
+        type=str,
+        default=None,
+        help="Namespace lógico do dataset; por padrão deriva do nome do arquivo",
+    )
     args = parser.parse_args()
-    run_pipeline(args.dataset_path)
+    dataset_path = args.dataset_path
+    if not dataset_path.is_absolute():
+        dataset_path = (ROOT / dataset_path).resolve()
+    context = dataset_context(dataset_key=args.dataset_key, dataset_path=dataset_path)
+    run_pipeline(dataset_path, context)
 
 
 if __name__ == "__main__":

@@ -17,32 +17,31 @@ ROOT = Path(__file__).resolve().parent.parent
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
+from avaliacao.offline_protocol import (
+    build_future_queries,
+    load_split_interactions,
+    parse_tags as parse_tags_offline,
+    resolve_dataset_dirs,
+)
+from dataset_context import manifest_path
+from pipeline_contracts import split_signature_from_manifest_file, split_signature_from_metadata
 from progress_utils import IterationProgress
 from treinamento.model_utils import (
     infer_model_family,
+    load_model_metadata,
     model_id_from_dir,
     rel_path,
     resolve_model_dir,
 )
 from treinamento.rankers import load_ranker
 
-SPLITS_DIR = ROOT / "treinamento" / "dados" / "splits"
-OUTPUT_DIR = ROOT / "extracao_filtragem" / "output"
 RESULTADOS_DIR = ROOT / "avaliacao" / "resultados"
 MS_POR_DIA = 86_400_000
 K_PADRAO = [5, 10, 20]
 
 
 def _parse_tags(value) -> list[str]:
-    if isinstance(value, (list, np.ndarray)):
-        return [str(t) for t in value]
-    if isinstance(value, str):
-        try:
-            parsed = ast.literal_eval(value)
-            return [str(t) for t in parsed] if isinstance(parsed, list) else [value]
-        except Exception:
-            return [value]
-    return []
+    return parse_tags_offline(value)
 
 
 def _normalizar_k(lista_k: Iterable[int]) -> list[int]:
@@ -64,44 +63,6 @@ def _detectar_coluna_tempo(interactions: pd.DataFrame) -> str | None:
         if col in interactions.columns:
             return col
     return None
-
-
-def carregar_splits_teste() -> tuple[pd.DataFrame, pd.DataFrame]:
-    test_posts_path = SPLITS_DIR / "test_posts.parquet"
-    test_inter_path = SPLITS_DIR / "test_interactions.parquet"
-    if not test_posts_path.exists() or not test_inter_path.exists():
-        raise FileNotFoundError(
-            "Splits de teste não encontrados em treinamento/dados/splits/. "
-            "Execute: python treinamento/dividir_dataset.py"
-        )
-
-    test_posts = pd.read_parquet(test_posts_path)
-    test_posts["tags_fitness"] = test_posts["tags_fitness"].apply(_parse_tags)
-    test_interactions = pd.read_parquet(test_inter_path)
-    return test_posts, test_interactions
-
-
-def construir_mapa_message_id_global() -> dict[int, int]:
-    msgs_path = OUTPUT_DIR / "messages_fitness.parquet"
-    if not msgs_path.exists():
-        return {}
-    msgs_df = pd.read_parquet(msgs_path)
-    if "message_id" not in msgs_df.columns:
-        return {}
-    return {idx: int(mid) for idx, mid in enumerate(msgs_df["message_id"].tolist())}
-
-
-def construir_lookup_catalogo(ranker) -> tuple[dict[int, int], dict[int, int]]:
-    posts = ranker.artifacts.posts_cache
-    message_to_row: dict[int, int] = {}
-    if "_message_id" in posts.columns:
-        values = pd.to_numeric(posts["_message_id"], errors="coerce")
-        for row_pos, value in enumerate(values):
-            if pd.notna(value):
-                message_to_row[int(value)] = row_pos
-
-    fallback_catalog = construir_mapa_message_id_global()
-    return message_to_row, fallback_catalog
 
 
 def recomendar_ids(
@@ -225,22 +186,6 @@ def diversidade_intra_lista(tags_recomendadas: list[list[str]]) -> float:
     return float(np.mean(distancias)) if distancias else 0.0
 
 
-def _timestamp_em_ms(valor) -> int | None:
-    if pd.isna(valor):
-        return None
-    if isinstance(valor, (int, np.integer)):
-        return int(valor)
-    if isinstance(valor, (float, np.floating)):
-        return int(valor)
-
-    texto = str(valor)
-    try:
-        dt = pd.to_datetime(texto, utc=True)
-        return int(dt.value // 1_000_000)
-    except Exception:
-        return None
-
-
 def _total_consultas_candidatas(interactions: pd.DataFrame) -> int:
     return int(
         sum(
@@ -254,29 +199,11 @@ def avaliar(
     ranker,
     ks: list[int],
     model_dir: Path,
+    splits_dir: Path,
+    output_dir: Path,
 ) -> tuple[dict, pd.DataFrame, pd.DataFrame]:
-    _, test_interactions = carregar_splits_teste()
-    message_to_row, fallback_catalog = construir_lookup_catalogo(ranker)
-
-    if "message_id" not in test_interactions.columns or "user_id" not in test_interactions.columns:
-        raise ValueError("test_interactions.parquet precisa conter as colunas user_id e message_id.")
-
-    tempo_col = _detectar_coluna_tempo(test_interactions)
-    if tempo_col is None:
-        posts_cache = ranker.artifacts.posts_cache
-        if "creation_date" in posts_cache.columns and posts_cache.index.name is not None:
-            tempo_col = "__fallback_order"
-            test_interactions = test_interactions.reset_index(drop=True)
-            test_interactions[tempo_col] = np.arange(len(test_interactions))
-        else:
-            test_interactions = test_interactions.reset_index(drop=True)
-            tempo_col = "__fallback_order"
-            test_interactions[tempo_col] = np.arange(len(test_interactions))
-
-    test_interactions = test_interactions.copy()
-    test_interactions["__ts_ms"] = test_interactions[tempo_col].apply(_timestamp_em_ms)
-    if test_interactions["__ts_ms"].isna().all():
-        test_interactions["__ts_ms"] = np.arange(len(test_interactions), dtype=np.int64)
+    test_interactions = load_split_interactions(splits_dir, "test")
+    queries = build_future_queries(ranker, test_interactions, output_dir)
 
     catalogo_total = len(ranker.artifacts.posts_cache)
     uso_catalogo = set()
@@ -284,7 +211,7 @@ def avaliar(
     novidades = []
     recencias = []
     latencias_ms = []
-    total_queries_candidatas = _total_consultas_candidatas(test_interactions)
+    total_queries_candidatas = len(queries)
     progress = IterationProgress(
         total=total_queries_candidatas,
         label=f"Avaliação {model_id_from_dir(model_dir)}",
@@ -299,92 +226,73 @@ def avaliar(
 
     pop = Counter(test_interactions["message_id"].tolist())
 
-    for user_id, grupo in test_interactions.groupby("user_id"):
-        g = grupo.sort_values("__ts_ms")
-        eventos = g[["message_id", "__ts_ms"]].to_dict("records")
-        if len(eventos) < 2:
-            continue
+    for query in queries:
+        processed_queries += 1
+        try:
+            started = perf_counter()
+            rec_ids_message, rec_tags, rec_scores, rec_local_idxs = recomendar_ids(
+                ranker,
+                tags_referencia=query.reference_tags,
+                timestamp_referencia=query.reference_timestamp_ms,
+                top_k=max(ks),
+            )
+            latencias_ms.append((perf_counter() - started) * 1000.0)
 
-        for i, evento in enumerate(eventos[:-1]):
-            processed_queries += 1
-            try:
-                mensagem_ref = int(evento["message_id"])
-                ts_ref = int(evento["__ts_ms"])
+            if not rec_ids_message:
+                continue
 
-                futuros = {int(x["message_id"]) for x in eventos[i + 1 :]}
-                if not futuros:
+            uso_catalogo.update(rec_local_idxs)
+            ilads.append(diversidade_intra_lista(rec_tags))
+
+            for local_idx in rec_local_idxs:
+                rec_msg = None
+                if "_message_id" in ranker.artifacts.posts_cache.columns and local_idx < len(
+                    ranker.artifacts.posts_cache
+                ):
+                    maybe_mid = ranker.artifacts.posts_cache.iloc[local_idx].get("_message_id")
+                    if pd.notna(maybe_mid):
+                        rec_msg = int(maybe_mid)
+                if rec_msg is None:
                     continue
+                freq = pop.get(rec_msg, 0)
+                novidades.append(1.0 / np.log2(freq + 2.0))
 
-                if mensagem_ref in message_to_row:
-                    row_pos_ref = message_to_row[mensagem_ref]
-                    post_ref = ranker.artifacts.posts_cache.iloc[row_pos_ref]
-                else:
-                    idx_ref = None
-                    for idx, mid in fallback_catalog.items():
-                        if mid == mensagem_ref:
-                            idx_ref = idx
-                            break
-                    if idx_ref is None or idx_ref not in ranker.artifacts.posts_cache.index:
-                        continue
-                    post_ref = ranker.artifacts.posts_cache.loc[idx_ref]
+                if "creation_date" in ranker.artifacts.posts_cache.columns:
+                    rec_ts = int(ranker.artifacts.posts_cache.iloc[local_idx]["creation_date"])
+                    recencias.append(
+                        abs(rec_ts - query.reference_timestamp_ms) / MS_POR_DIA
+                    )
 
-                tags_ref = _parse_tags(post_ref.get("tags_fitness", []))
-                timestamp_ref = int(post_ref.get("creation_date", ts_ref))
-
-                started = perf_counter()
-                rec_ids_message, rec_tags, rec_scores, rec_local_idxs = recomendar_ids(
-                    ranker,
-                    tags_referencia=tags_ref,
-                    timestamp_referencia=timestamp_ref,
-                    top_k=max(ks),
+            for k in ks:
+                acumuladores[k]["precision"].append(
+                    precision_at_k(query.future_ids, rec_ids_message, k)
                 )
-                latencias_ms.append((perf_counter() - started) * 1000.0)
-
-                if not rec_ids_message:
-                    continue
-
-                uso_catalogo.update(rec_local_idxs)
-                ilads.append(diversidade_intra_lista(rec_tags))
-
-                for local_idx in rec_local_idxs:
-                    rec_msg = None
-                    if "_message_id" in ranker.artifacts.posts_cache.columns and local_idx < len(
-                        ranker.artifacts.posts_cache
-                    ):
-                        maybe_mid = ranker.artifacts.posts_cache.iloc[local_idx].get("_message_id")
-                        if pd.notna(maybe_mid):
-                            rec_msg = int(maybe_mid)
-                    if rec_msg is None:
-                        continue
-                    freq = pop.get(rec_msg, 0)
-                    novidades.append(1.0 / np.log2(freq + 2.0))
-
-                    if "creation_date" in ranker.artifacts.posts_cache.columns:
-                        rec_ts = int(ranker.artifacts.posts_cache.iloc[local_idx]["creation_date"])
-                        recencias.append(abs(rec_ts - ts_ref) / MS_POR_DIA)
-
-                for k in ks:
-                    acumuladores[k]["precision"].append(precision_at_k(futuros, rec_ids_message, k))
-                    acumuladores[k]["recall"].append(recall_at_k(futuros, rec_ids_message, k))
-                    acumuladores[k]["hitrate"].append(hitrate_at_k(futuros, rec_ids_message, k))
-                    acumuladores[k]["map"].append(map_at_k(futuros, rec_ids_message, k))
-                    acumuladores[k]["ndcg"].append(ndcg_at_k(futuros, rec_ids_message, k))
-                    acumuladores[k]["mrr"].append(mrr_at_k(futuros, rec_ids_message, k))
-
-                linhas_q.append(
-                    {
-                        "user_id": int(user_id),
-                        "message_id_referencia": mensagem_ref,
-                        "timestamp_referencia_ms": ts_ref,
-                        "n_relevantes_futuros": len(futuros),
-                        "n_recomendados": len(rec_ids_message),
-                        "top1_recomendado": rec_ids_message[0] if rec_ids_message else None,
-                        "top1_score": rec_scores[0] if rec_scores else None,
-                    }
+                acumuladores[k]["recall"].append(
+                    recall_at_k(query.future_ids, rec_ids_message, k)
                 )
-            finally:
-                if total_queries_candidatas > 0:
-                    progress.log(processed_queries)
+                acumuladores[k]["hitrate"].append(
+                    hitrate_at_k(query.future_ids, rec_ids_message, k)
+                )
+                acumuladores[k]["map"].append(map_at_k(query.future_ids, rec_ids_message, k))
+                acumuladores[k]["ndcg"].append(
+                    ndcg_at_k(query.future_ids, rec_ids_message, k)
+                )
+                acumuladores[k]["mrr"].append(mrr_at_k(query.future_ids, rec_ids_message, k))
+
+            linhas_q.append(
+                {
+                    "user_id": int(query.user_id),
+                    "message_id_referencia": int(query.reference_message_id),
+                    "timestamp_referencia_ms": int(query.reference_timestamp_ms),
+                    "n_relevantes_futuros": len(query.future_ids),
+                    "n_recomendados": len(rec_ids_message),
+                    "top1_recomendado": rec_ids_message[0] if rec_ids_message else None,
+                    "top1_score": rec_scores[0] if rec_scores else None,
+                }
+            )
+        finally:
+            if total_queries_candidatas > 0:
+                progress.log(processed_queries)
 
     rows_metricas = []
     resumo_metricas = {}
@@ -407,6 +315,9 @@ def avaliar(
         "avg_recommended_recency_days": float(np.mean(recencias)) if recencias else 0.0,
     }
 
+    current_split_signature = split_signature_from_manifest_file(manifest_path(splits_dir))
+    model_metadata = load_model_metadata(model_dir)
+    model_split_signature = split_signature_from_metadata(model_metadata)
     metadata = {
         "generated_at_utc": datetime.now(timezone.utc).isoformat(),
         "model_dir": rel_path(model_dir),
@@ -420,6 +331,13 @@ def avaliar(
             "Para cada usuário no split de teste, ordena interações por tempo. "
             "Cada interação vira item de referência; o ground truth é o conjunto de interações futuras do mesmo usuário. "
             "O recomendador gera Top-K com base nas tags/timestamp do item de referência e comparamos com os itens futuros reais."
+        ),
+        "split_signature": current_split_signature,
+        "model_split_signature": model_split_signature,
+        "split_consistente": (
+            bool(current_split_signature)
+            and bool(model_split_signature)
+            and current_split_signature == model_split_signature
         ),
     }
 
@@ -505,22 +423,54 @@ def main() -> None:
         default=str(RESULTADOS_DIR),
         help="Diretório de saída dos arquivos da avaliação",
     )
+    parser.add_argument(
+        "--dataset-key",
+        type=str,
+        default=None,
+        help="Namespace lógico do dataset; usado como fallback quando o metadata não informa",
+    )
+    parser.add_argument(
+        "--splits-dir",
+        type=str,
+        default=None,
+        help="Override opcional do diretório de splits",
+    )
+    parser.add_argument(
+        "--output-dir",
+        type=str,
+        default=None,
+        help="Override opcional do diretório de parquets extraídos",
+    )
     args = parser.parse_args()
 
     ks = _normalizar_k(args.k)
     model_dir = resolve_model_dir(args.model_dir)
+    splits_dir, output_dir = resolve_dataset_dirs(
+        model_dir,
+        args.dataset_key,
+        args.splits_dir,
+        args.output_dir,
+    )
     out_dir = Path(args.out_dir)
     if not out_dir.is_absolute():
         out_dir = ROOT / out_dir
 
     ranker = load_ranker(model_dir)
-    resumo, df_metricas, df_queries = avaliar(ranker, ks, model_dir)
+    resumo, df_metricas, df_queries = avaliar(
+        ranker,
+        ks,
+        model_dir,
+        splits_dir,
+        output_dir,
+    )
     caminho_json, caminho_csv, caminho_md = salvar_resultados(
         resumo, df_metricas, df_queries, out_dir
     )
 
     print("=== Avaliação concluída ===")
     print(f"Modelo avaliado  : {model_dir}")
+    print(f"Splits utilizados: {splits_dir}")
+    print(f"Output utilizado : {output_dir}")
     print(f"Consultas avaliadas: {resumo['metadata']['n_queries_validas']}")
     print(f"Resultados JSON : {caminho_json}")
     print(f"Resultados CSV  : {caminho_csv}")

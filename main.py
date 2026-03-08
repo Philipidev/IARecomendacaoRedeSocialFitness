@@ -17,6 +17,13 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from dataset_context import (
+    DatasetContext,
+    dataset_context,
+    default_model_dir_for_dataset,
+    load_manifest,
+)
+from pipeline_contracts import split_signature_from_manifest_payload, split_signature_from_metadata
 from treinamento.model_utils import merge_model_metadata
 
 ROOT = Path(__file__).resolve().parent
@@ -45,7 +52,7 @@ AVALIACAO_MANUAL_SCRIPT = ROOT / "avaliacao" / "avaliacao_manual.py"
 OTIMIZAR_PESOS_SCRIPT = ROOT / "avaliacao" / "otimizar_pesos.py"
 BENCHMARK_TCC_SCRIPT = ROOT / "avaliacao" / "benchmark_modelos.py"
 
-STATE_VERSION = 1
+STATE_VERSION = 2
 
 DEFAULT_SPLIT_CONFIG = {
     "train": 0.70,
@@ -226,11 +233,13 @@ def find_download_option(scale_factor: str | None) -> dict[str, Any] | None:
     return None
 
 
-def default_model_target() -> dict[str, Any]:
+def default_model_target(dataset_key: str | None = None) -> dict[str, Any]:
+    model_dir = default_model_dir_for_dataset(dataset_key)
     return {
         "type": "modelo_padrao",
-        "model_dir": rel_path(MODELO_DIR),
-        "family": infer_model_family_from_disk(MODELO_DIR),
+        "model_id": "modelo_padrao",
+        "model_dir": rel_path(model_dir),
+        "family": infer_model_family_from_disk(model_dir),
         "label": "Modelo padrão",
     }
 
@@ -284,13 +293,15 @@ def tcc_model_map(config: dict[str, Any] | None) -> dict[str, dict[str, Any]]:
 def make_experiment_model_target(
     model_cfg: dict[str, Any],
     *,
+    dataset_key: str | None = None,
     selected_at: str | None = None,
 ) -> dict[str, Any]:
     experiment_id = str(model_cfg["id"])
+    model_dir = dataset_context(dataset_key=dataset_key).models_dir / experiment_id
     payload = {
         "type": "experimento_tcc",
         "experiment_id": experiment_id,
-        "model_dir": rel_path(MODELOS_DIR / experiment_id),
+        "model_dir": rel_path(model_dir),
         "family": str(model_cfg.get("family", "baseline_hibrido")),
         "label": f"{experiment_id} ({model_cfg.get('family', 'baseline_hibrido')})",
         "descricao": str(model_cfg.get("descricao", "")),
@@ -304,6 +315,7 @@ def make_experiment_model_target(
 def normalize_model_target(
     target: Any,
     config: dict[str, Any] | None,
+    dataset_key: str | None = None,
 ) -> dict[str, Any]:
     selected_at = target.get("selected_at") if isinstance(target, dict) else None
     if isinstance(target, dict) and target.get("type") == "experimento_tcc":
@@ -313,10 +325,12 @@ def normalize_model_target(
             if model_cfg is not None:
                 return make_experiment_model_target(
                     model_cfg,
+                    dataset_key=dataset_key,
                     selected_at=selected_at,
                 )
 
-            model_dir = abs_path(target.get("model_dir")) or (MODELOS_DIR / experiment_id)
+            default_model_dir = dataset_context(dataset_key=dataset_key).models_dir / experiment_id
+            model_dir = abs_path(target.get("model_dir")) or default_model_dir
             payload = {
                 "type": "experimento_tcc",
                 "experiment_id": experiment_id,
@@ -336,7 +350,7 @@ def normalize_model_target(
                 payload["selected_at"] = selected_at
             return payload
 
-    payload = default_model_target()
+    payload = default_model_target(dataset_key=dataset_key)
     if selected_at:
         payload["selected_at"] = selected_at
     return payload
@@ -372,20 +386,46 @@ def resolve_model_target_dir(target: dict[str, Any]) -> Path:
     model_dir = abs_path(target.get("model_dir"))
     if model_dir is not None:
         return model_dir
-    return MODELO_DIR
+    return default_model_dir_for_dataset()
 
 
-def build_model_dir_status(model_dir: Path, family: str | None = None) -> dict[str, Any]:
+def build_model_dir_status(
+    model_dir: Path,
+    family: str | None = None,
+    *,
+    selected_dataset: dict[str, Any] | None = None,
+    split_manifest: dict[str, Any] | None = None,
+) -> dict[str, Any]:
     family_norm = infer_model_family_from_disk(model_dir, fallback=family or "baseline_hibrido")
     required_paths = [model_dir / name for name in TREINAMENTO_MODELO_REQUIRED]
     if family_norm == "ltr_lightgbm":
         required_paths.extend(model_dir / name for name in TREINAMENTO_LTR_REQUIRED)
+    metadata = load_json_optional(model_dir / "metadata.json", default={})
+    dataset_meta = metadata.get("dataset", {}) if isinstance(metadata, dict) else {}
+    dataset_match = manifest_matches_selected_dataset(
+        {"dataset": dataset_meta} if isinstance(dataset_meta, dict) else {},
+        selected_dataset,
+    )
+    split_match = split_signature_matches_manifest(
+        metadata if isinstance(metadata, dict) else None,
+        split_manifest if isinstance(split_manifest, dict) else None,
+    )
+    required_status = build_file_status(required_paths)
+    required_status["dataset_match"] = dataset_match
+    required_status["split_match"] = split_match
+    required_status["stale_split"] = (split_match is False)
+    required_status["ready"] = (
+        required_status["ready"]
+        and dataset_match
+        and split_match is not False
+    )
     return {
         "model_dir": rel_path(model_dir),
         "family": family_norm,
-        "required": build_file_status(required_paths),
+        "required": required_status,
         "optional": build_file_status([model_dir / name for name in TREINAMENTO_MODELO_OPTIONAL]),
         "metadata_exists": (model_dir / "metadata.json").exists(),
+        "dataset": dataset_meta if isinstance(dataset_meta, dict) else {},
     }
 
 
@@ -423,12 +463,93 @@ def update_selected_dataset(
     scale_factor: str | None,
     source: str,
 ) -> None:
+    context = dataset_context(dataset_path=dataset_path, scale_factor=scale_factor)
     state["selected_dataset"] = {
         "path": rel_path(dataset_path),
-        "scale_factor": scale_factor,
+        "dataset_key": context.dataset_key,
+        "scale_factor": context.scale_factor,
         "source": source,
         "selected_at": now_iso(),
         "exists": dataset_path.exists(),
+    }
+
+
+def current_dataset_context(state: dict[str, Any], *, legacy_when_missing: bool = True) -> DatasetContext:
+    selected = state.get("selected_dataset")
+    if isinstance(selected, dict):
+        return dataset_context(
+            dataset_key=selected.get("dataset_key"),
+            dataset_path=selected.get("path"),
+            scale_factor=selected.get("scale_factor"),
+        )
+    if legacy_when_missing:
+        return dataset_context(use_legacy=True)
+    return dataset_context()
+
+
+def manifest_matches_selected_dataset(
+    manifest: dict[str, Any],
+    selected_dataset: dict[str, Any] | None,
+) -> bool:
+    if not isinstance(selected_dataset, dict):
+        return False
+    dataset = manifest.get("dataset")
+    if not isinstance(dataset, dict):
+        return False
+
+    expected_key = str(selected_dataset.get("dataset_key", "")).strip()
+    actual_key = str(dataset.get("dataset_key", "")).strip()
+    if not expected_key or not actual_key or expected_key != actual_key:
+        return False
+
+    expected_path = str(selected_dataset.get("path", "")).strip()
+    actual_path = str(dataset.get("dataset_path", "")).strip()
+    if expected_path and actual_path and expected_path != actual_path:
+        return False
+    return True
+
+
+def split_signature_matches_manifest(
+    metadata: dict[str, Any] | None,
+    manifest: dict[str, Any] | None,
+) -> bool | None:
+    metadata_sig = split_signature_from_metadata(metadata if isinstance(metadata, dict) else None)
+    manifest_sig = split_signature_from_manifest_payload(
+        manifest if isinstance(manifest, dict) else None
+    )
+    if not metadata_sig or not manifest_sig:
+        return None
+    return metadata_sig == manifest_sig
+
+
+def result_split_status(
+    payload: dict[str, Any] | None,
+    manifest: dict[str, Any] | None,
+    *,
+    metadata_key: str = "metadata",
+) -> dict[str, Any]:
+    if not isinstance(payload, dict):
+        return {
+            "has_signature": False,
+            "split_match": None,
+            "stale": False,
+        }
+    meta = payload.get(metadata_key)
+    if not isinstance(meta, dict):
+        meta = payload.get("metadata", {}) if isinstance(payload.get("metadata"), dict) else {}
+    result_sig = meta.get("split_signature")
+    manifest_sig = split_signature_from_manifest_payload(manifest if isinstance(manifest, dict) else None)
+    if not result_sig or not manifest_sig:
+        return {
+            "has_signature": False,
+            "split_match": None,
+            "stale": False,
+        }
+    split_match = str(result_sig) == str(manifest_sig)
+    return {
+        "has_signature": True,
+        "split_match": split_match,
+        "stale": not split_match,
     }
 
 
@@ -441,6 +562,27 @@ def build_file_status(paths: list[Path]) -> dict[str, Any]:
         "missing": missing,
         "total": len(paths),
     }
+
+
+def build_stage_status(
+    paths: list[Path],
+    *,
+    manifest_dir: Path,
+    selected_dataset: dict[str, Any] | None,
+) -> dict[str, Any]:
+    status = build_file_status(paths)
+    manifest = load_manifest(manifest_dir)
+    manifest_exists = bool(manifest)
+    dataset_match = manifest_matches_selected_dataset(manifest, selected_dataset)
+    status.update(
+        {
+            "manifest_exists": manifest_exists,
+            "manifest_path": rel_path(manifest_dir / "dataset_manifest.json"),
+            "dataset_match": dataset_match,
+            "ready": status["ready"] and dataset_match,
+        }
+    )
+    return status
 
 
 def default_state() -> dict[str, Any]:
@@ -464,10 +606,24 @@ def ensure_state_shape(state: dict[str, Any]) -> dict[str, Any]:
         base["last_runs"] = {}
     if not isinstance(base.get("workspace"), dict):
         base["workspace"] = {}
+    selected = base.get("selected_dataset")
+    if isinstance(selected, dict):
+        selected_path = abs_path(selected.get("path"))
+        if selected_path and selected_path.exists():
+            selected["path"] = rel_path(selected_path)
+            context = dataset_context(
+                dataset_key=selected.get("dataset_key"),
+                dataset_path=selected_path,
+                scale_factor=selected.get("scale_factor"),
+            )
+            selected["dataset_key"] = context.dataset_key
+            selected["scale_factor"] = context.scale_factor
     config, _ = load_tcc_config_safe()
+    dataset_key = selected.get("dataset_key") if isinstance(selected, dict) else None
     base["selected_model_target"] = normalize_model_target(
         base.get("selected_model_target"),
         config,
+        dataset_key,
     )
     base["selected_benchmark"] = normalize_benchmark_target(
         base.get("selected_benchmark"),
@@ -505,6 +661,7 @@ def discover_datasets() -> list[dict[str, Any]]:
                 {
                     "name": path.name,
                     "path": rel_path(path),
+                    "dataset_key": dataset_context(dataset_path=path).dataset_key,
                     "scale_factor": detect_scale_factor(path.name),
                     "size_bytes": stat.st_size,
                     "size_human": format_size(stat.st_size),
@@ -530,25 +687,55 @@ def refresh_state(state: dict[str, Any]) -> dict[str, Any]:
         exists = bool(selected_path and selected_path.exists())
         selected["exists"] = exists
         if selected_path and selected_path.exists():
+            selected_context = dataset_context(
+                dataset_key=selected.get("dataset_key"),
+                dataset_path=selected_path,
+                scale_factor=selected.get("scale_factor"),
+            )
             selected["path"] = rel_path(selected_path)
-            selected["scale_factor"] = selected.get("scale_factor") or detect_scale_factor(selected_path.name)
+            selected["dataset_key"] = selected_context.dataset_key
+            selected["scale_factor"] = selected_context.scale_factor
             try:
                 selected["size_bytes"] = selected_path.stat().st_size
             except OSError:
                 pass
+        else:
+            selected_context = dataset_context(
+                dataset_key=selected.get("dataset_key"),
+                dataset_path=selected.get("path"),
+                scale_factor=selected.get("scale_factor"),
+            )
+        selected["namespace"] = {
+            "output_dir": rel_path(selected_context.output_dir),
+            "dados_dir": rel_path(selected_context.dados_dir),
+            "splits_dir": rel_path(selected_context.splits_dir),
+            "models_dir": rel_path(selected_context.models_dir),
+            "results_dir": rel_path(selected_context.results_dir),
+        }
+    else:
+        selected_context = current_dataset_context(state)
 
+    selected_dataset_key = (
+        selected.get("dataset_key")
+        if isinstance(selected, dict)
+        else None
+    )
     selected_target = normalize_model_target(
         state.get("selected_model_target"),
         tcc_config,
+        selected_dataset_key,
     )
     state["selected_model_target"] = selected_target
     selected_model_dir = resolve_model_target_dir(selected_target)
+    splits_manifest = load_manifest(selected_context.splits_dir)
     selected_model_status = build_model_dir_status(
         selected_model_dir,
         family=str(selected_target.get("family", "baseline_hibrido")),
+        selected_dataset=selected if isinstance(selected, dict) else None,
+        split_manifest=splits_manifest,
     )
     selected_family = selected_model_status["family"]
-    selected_results_root = target_results_root(selected_target)
+    selected_results_root = target_results_root(selected_target, selected_dataset_key)
 
     selected_benchmark = normalize_benchmark_target(
         state.get("selected_benchmark"),
@@ -556,42 +743,102 @@ def refresh_state(state: dict[str, Any]) -> dict[str, Any]:
     )
     state["selected_benchmark"] = selected_benchmark
 
-    extracao_status = build_file_status([OUTPUT_DIR / name for name in EXTRACAO_OUTPUTS])
-    dados_status = build_file_status([DADOS_DIR / name for name in TREINAMENTO_DADOS_OUTPUTS])
-    splits_status = build_file_status([SPLITS_DIR / name for name in TREINAMENTO_SPLITS_OUTPUTS])
-    modelo_default_status = build_model_dir_status(MODELO_DIR)
-    if str(selected_target.get("type", "modelo_padrao")) == "experimento_tcc":
-        offline_result_status = build_file_status(
-            [selected_results_root / "offline" / name for name in AVALIACAO_OFFLINE_OUTPUTS]
-        )
-        popularidade_result_status = build_file_status(
-            [selected_results_root / "popularidade" / "metricas_antes_depois.json"]
-        )
-        manual_result_status = build_file_status(
-            [selected_results_root / "manual" / "avaliacao_manual.md"]
-        )
-    else:
-        offline_result_status = build_file_status([RESULTADOS_DIR / name for name in AVALIACAO_OFFLINE_OUTPUTS])
-        popularidade_result_status = build_file_status([AVALIACAO_DIR / "metricas_antes_depois.json"])
-        manual_result_status = build_file_status([RESULTADOS_DIR / "avaliacao_manual.md"])
+    extracao_status = build_stage_status(
+        [selected_context.output_dir / name for name in EXTRACAO_OUTPUTS],
+        manifest_dir=selected_context.output_dir,
+        selected_dataset=selected if isinstance(selected, dict) else None,
+    )
+    dados_status = build_stage_status(
+        [selected_context.dados_dir / name for name in TREINAMENTO_DADOS_OUTPUTS],
+        manifest_dir=selected_context.dados_dir,
+        selected_dataset=selected if isinstance(selected, dict) else None,
+    )
+    splits_status = build_stage_status(
+        [selected_context.splits_dir / name for name in TREINAMENTO_SPLITS_OUTPUTS],
+        manifest_dir=selected_context.splits_dir,
+        selected_dataset=selected if isinstance(selected, dict) else None,
+    )
+    modelo_default_status = build_model_dir_status(
+        default_model_dir_for_dataset(selected_dataset_key),
+        selected_dataset=selected if isinstance(selected, dict) else None,
+        split_manifest=splits_manifest,
+    )
+    offline_payload = load_json_optional(
+        selected_results_root / "offline" / "metricas_resumo.json",
+        default={},
+    )
+    offline_result_status = build_file_status(
+        [selected_results_root / "offline" / name for name in AVALIACAO_OFFLINE_OUTPUTS]
+    )
+    offline_result_status.update(result_split_status(offline_payload, splits_manifest))
+    if offline_result_status["stale"]:
+        offline_result_status["ready"] = False
+    popularidade_payload = load_json_optional(
+        selected_results_root / "popularidade" / "metricas_antes_depois.json",
+        default={},
+    )
+    popularidade_result_status = build_file_status(
+        [selected_results_root / "popularidade" / "metricas_antes_depois.json"]
+    )
+    popularidade_result_status.update(result_split_status(popularidade_payload, splits_manifest))
+    if popularidade_result_status["stale"]:
+        popularidade_result_status["ready"] = False
+    manual_result_status = build_file_status(
+        [selected_results_root / "manual" / "avaliacao_manual.md"]
+    )
     otimizacao_result_status = build_file_status(
         [
-            (
-                selected_results_root / PESOS_EXPERIMENTOS_FILENAME
-                if str(selected_target.get("type", "modelo_padrao")) == "experimento_tcc"
-                else RESULTADOS_DIR / PESOS_EXPERIMENTOS_FILENAME
-            ),
+            selected_results_root / PESOS_EXPERIMENTOS_FILENAME,
             selected_model_dir / PESOS_OTIMOS_FILENAME,
         ]
     )
-    benchmark_result_status = build_file_status([RESULTADOS_DIR / name for name in BENCHMARK_TCC_OUTPUTS])
-    modelos_experimentos = [path for path in MODELOS_DIR.iterdir() if path.is_dir()] if MODELOS_DIR.exists() else []
+    benchmark_result_status = build_file_status(
+        [selected_context.results_dir / name for name in BENCHMARK_TCC_OUTPUTS]
+    )
+    benchmark_payload = load_json_optional(
+        selected_context.results_dir / "benchmark_modelos.json",
+        default={},
+    )
+    benchmark_manifest_sig = split_signature_from_manifest_payload(splits_manifest)
+    benchmark_exec_sig = (
+        str(benchmark_payload.get("split_signature_at_execution", "")).strip()
+        if isinstance(benchmark_payload, dict)
+        else ""
+    )
+    benchmark_result_status.update(
+        {
+            "has_signature": bool(benchmark_exec_sig and benchmark_manifest_sig),
+            "split_match": (
+                benchmark_exec_sig == benchmark_manifest_sig
+                if benchmark_exec_sig and benchmark_manifest_sig
+                else None
+            ),
+            "stale": (
+                bool(benchmark_exec_sig and benchmark_manifest_sig)
+                and benchmark_exec_sig != benchmark_manifest_sig
+            ),
+        }
+    )
+    if benchmark_result_status["stale"]:
+        benchmark_result_status["ready"] = False
+    modelos_experimentos = (
+        [path for path in selected_context.models_dir.iterdir() if path.is_dir()]
+        if selected_context.models_dir.exists()
+        else []
+    )
     enabled_tcc_models = tcc_models_from_config(tcc_config, enabled_only=True)
 
     state["workspace"] = {
         "datasets": datasets,
         "dataset_dir": rel_path(DATASET_DIR),
         "selected_dataset_exists": bool(selected and selected.get("exists")),
+        "selected_dataset_context": {
+            "output_dir": rel_path(selected_context.output_dir),
+            "dados_dir": rel_path(selected_context.dados_dir),
+            "splits_dir": rel_path(selected_context.splits_dir),
+            "models_dir": rel_path(selected_context.models_dir),
+            "results_dir": rel_path(selected_context.results_dir),
+        },
         "extracao": extracao_status,
         "treinamento": {
             "dados": dados_status,
@@ -600,23 +847,25 @@ def refresh_state(state: dict[str, Any]) -> dict[str, Any]:
             "modelo_opcional": modelo_default_status["optional"],
             "alvo": selected_model_status,
             "ready_for_recommendation": selected_model_status["required"]["ready"],
-            "ready_for_evaluation": selected_model_status["required"]["ready"] and splits_status["ready"],
+            "ready_for_evaluation": (
+                selected_model_status["required"]["ready"] and splits_status["ready"]
+            ),
         },
         "avaliacao": {
             "can_run": {
                 "offline": selected_model_status["required"]["ready"]
-                and (SPLITS_DIR / "test_interactions.parquet").exists()
-                and (OUTPUT_DIR / MESSAGES_FITNESS_FILE).exists(),
+                and (selected_context.splits_dir / "test_interactions.parquet").exists()
+                and extracao_status["ready"],
                 "popularidade": selected_family == "baseline_hibrido"
                 and selected_model_status["required"]["ready"]
-                and (SPLITS_DIR / "val_interactions.parquet").exists(),
+                and (selected_context.splits_dir / "val_interactions.parquet").exists(),
                 "manual": selected_model_status["required"]["ready"]
                 and (AVALIACAO_DIR / "casos_manuais.yaml").exists(),
                 "otimizacao": selected_family == "baseline_hibrido"
                 and selected_model_status["required"]["ready"]
-                and (SPLITS_DIR / "val_posts.parquet").exists(),
+                and (selected_context.splits_dir / "val_posts.parquet").exists(),
                 "benchmark_tcc": TCC_CONFIG_PATH.exists()
-                and (OUTPUT_DIR / MESSAGES_FITNESS_FILE).exists(),
+                and extracao_status["ready"],
             },
             "resultados": {
                 "offline": offline_result_status,
@@ -630,7 +879,7 @@ def refresh_state(state: dict[str, Any]) -> dict[str, Any]:
             "config_exists": TCC_CONFIG_PATH.exists(),
             "config_path": rel_path(TCC_CONFIG_PATH),
             "config_error": tcc_error,
-            "modelos_dir": rel_path(MODELOS_DIR),
+            "modelos_dir": rel_path(selected_context.models_dir),
             "num_modelos_experimento": len(modelos_experimentos),
             "num_modelos_habilitados": len(enabled_tcc_models),
             "benchmark_alvo": selected_benchmark,
@@ -649,11 +898,12 @@ def selected_dataset_label(state: dict[str, Any]) -> str:
     if not isinstance(selected, dict):
         return "nenhum dataset selecionado"
     path = selected.get("path", "(sem caminho)")
+    dataset_key = selected.get("dataset_key") or "sem namespace"
     scale_factor = selected.get("scale_factor") or "sem escala detectada"
     source = selected.get("source", "desconhecida")
     exists = selected.get("exists", False)
     suffix = "disponivel" if exists else "ausente"
-    return f"{path} [{scale_factor}, {source}, {suffix}]"
+    return f"{path} [{dataset_key}, {scale_factor}, {source}, {suffix}]"
 
 
 def get_last_run(state: dict[str, Any], key: str) -> dict[str, Any] | None:
@@ -664,9 +914,18 @@ def get_last_run(state: dict[str, Any], key: str) -> dict[str, Any] | None:
 def extraction_matches_selected_dataset(state: dict[str, Any]) -> bool:
     selected = state.get("selected_dataset")
     extraction = get_last_run(state, "extraction")
-    if not isinstance(selected, dict) or not extraction:
+    if not isinstance(selected, dict):
         return False
-    return selected.get("path") == extraction.get("dataset_path")
+    context = current_dataset_context(state)
+    manifest = load_manifest(context.output_dir)
+    if manifest and manifest_matches_selected_dataset(manifest, selected):
+        return True
+    if not extraction:
+        return False
+    return (
+        selected.get("dataset_key") == extraction.get("dataset_key")
+        and selected.get("path") == extraction.get("dataset_path")
+    )
 
 
 def print_menu_header(state: dict[str, Any]) -> None:
@@ -716,6 +975,13 @@ def print_state_details(state: dict[str, Any]) -> None:
     print(f"Arquivo de estado : {rel_path(STATE_PATH)}")
     print(f"Atualizado em     : {state['updated_at']}")
     print(f"Dataset ativo     : {selected_dataset_label(state)}")
+    namespace = workspace.get("selected_dataset_context", {})
+    if namespace:
+        print(f"Namespace output  : {namespace.get('output_dir', '-')}")
+        print(f"Namespace dados   : {namespace.get('dados_dir', '-')}")
+        print(f"Namespace splits  : {namespace.get('splits_dir', '-')}")
+        print(f"Namespace modelos : {namespace.get('models_dir', '-')}")
+        print(f"Namespace resultados: {namespace.get('results_dir', '-')}")
 
     datasets = workspace["datasets"]
     print(f"\nDatasets locais ({len(datasets)} encontrados):")
@@ -860,8 +1126,14 @@ def update_and_save(state: dict[str, Any]) -> dict[str, Any]:
 def prompt_model_target_selection(state: dict[str, Any]) -> dict[str, Any]:
     state = update_and_save(state)
     config, error = load_tcc_config_safe()
-    options: list[str] = ["Modelo padrão (treinamento/modelo)"]
-    payloads: list[dict[str, Any]] = [default_model_target()]
+    dataset_key = (
+        state.get("selected_dataset", {}).get("dataset_key")
+        if isinstance(state.get("selected_dataset"), dict)
+        else None
+    )
+    default_target = default_model_target(dataset_key)
+    options: list[str] = [f"Modelo padrão ({default_target['model_dir']})"]
+    payloads: list[dict[str, Any]] = [default_target]
 
     if error:
         print(f"[Aviso] {error}")
@@ -874,7 +1146,7 @@ def prompt_model_target_selection(state: dict[str, Any]) -> dict[str, Any]:
                 f"{model_cfg['id']} ({model_cfg.get('family', 'baseline_hibrido')})"
                 f"{enabled_suffix}{descricao_suffix}"
             )
-            payloads.append(make_experiment_model_target(model_cfg))
+            payloads.append(make_experiment_model_target(model_cfg, dataset_key=dataset_key))
 
     print("\nSelecione o alvo de modelo/experimento:")
     choice = choose_option(options, zero_label="Voltar")
@@ -883,7 +1155,7 @@ def prompt_model_target_selection(state: dict[str, Any]) -> dict[str, Any]:
 
     selected = dict(payloads[choice])
     selected["selected_at"] = now_iso()
-    state["selected_model_target"] = normalize_model_target(selected, config)
+    state["selected_model_target"] = normalize_model_target(selected, config, dataset_key)
     state = update_and_save(state)
     print(f"Alvo atualizado para: {selected_model_target_label(state)}")
     return state
@@ -993,6 +1265,7 @@ def download_dataset_by_scale_factor(
             "download",
             {
                 "dataset_path": rel_path(dataset_path),
+                "dataset_key": dataset_context(dataset_path=dataset_path).dataset_key,
                 "scale_factor": option["scale_factor"],
                 "source": source,
                 "already_present": True,
@@ -1014,7 +1287,7 @@ def download_dataset_by_scale_factor(
         state = update_and_save(state)
         datasets = state["workspace"]["datasets"]
         for dataset in datasets:
-            if dataset.get("scale_factor") == option["scale_factor"]:
+            if dataset.get("name") == option["filename"]:
                 dataset_path = abs_path(dataset["path"]) or dataset_path
                 break
 
@@ -1030,6 +1303,7 @@ def download_dataset_by_scale_factor(
             "download",
             {
                 "dataset_path": rel_path(dataset_path),
+                "dataset_key": dataset_context(dataset_path=dataset_path).dataset_key,
                 "scale_factor": option["scale_factor"],
                 "source": source,
             },
@@ -1149,13 +1423,14 @@ def build_training_plan(
     split_config: dict[str, Any] | None,
 ) -> tuple[dict[str, Any] | None, str | None]:
     target_type = str(target.get("type", "modelo_padrao"))
+    target_model_dir = resolve_model_target_dir(target)
     if target_type != "experimento_tcc":
         return (
             {
                 "target": target,
                 "experiment_id": None,
                 "family": str(target.get("family", "baseline_hibrido")),
-                "model_dir": MODELO_DIR,
+                "model_dir": target_model_dir,
                 "split_config": dict(split_config or DEFAULT_SPLIT_CONFIG),
                 "training_cfg": {},
                 "params": {},
@@ -1178,7 +1453,7 @@ def build_training_plan(
             "target": target,
             "experiment_id": experiment_id,
             "family": str(model_cfg.get("family", "baseline_hibrido")),
-            "model_dir": MODELOS_DIR / experiment_id,
+            "model_dir": target_model_dir,
             "split_config": dict(model_cfg.get("split_config", DEFAULT_SPLIT_CONFIG)),
             "training_cfg": dict(model_cfg.get("training", {})),
             "params": dict(model_cfg.get("params", {})),
@@ -1233,12 +1508,15 @@ def write_manual_baseline_weights(model_dir: Path, params: dict[str, Any]) -> Pa
     return path
 
 
-def target_results_root(target: dict[str, Any]) -> Path:
+def target_results_root(target: dict[str, Any], dataset_key: str | None = None) -> Path:
+    context = dataset_context(dataset_key=dataset_key)
     if str(target.get("type", "modelo_padrao")) == "experimento_tcc":
         experiment_id = str(target.get("experiment_id", "")).strip()
         if experiment_id:
-            return RESULTADOS_DIR / "modelos" / experiment_id
-    return RESULTADOS_DIR
+            return context.results_dir / "modelos" / experiment_id
+    if context.is_legacy:
+        return RESULTADOS_DIR
+    return context.results_dir / "modelo_padrao"
 
 
 def choose_evaluation_modes(target: dict[str, Any]) -> list[str] | None:
@@ -1288,21 +1566,25 @@ def print_stage_context(state: dict[str, Any], stage_name: str) -> None:
 
 def run_extraction_sequence(state: dict[str, Any], dataset_path: Path) -> dict[str, Any]:
     print_stage_context(state, "rodar a extracao")
+    selected = state.get("selected_dataset") or {}
     try:
+        pipeline_args = ["--dataset-path", str(dataset_path)]
+        if selected.get("dataset_key"):
+            pipeline_args.extend(["--dataset-key", str(selected["dataset_key"])])
         run_python_script(
             PIPELINE_SCRIPT,
-            ["--dataset-path", str(dataset_path)],
+            pipeline_args,
         )
     except subprocess.CalledProcessError as exc:
         print(f"[Erro] A extracao falhou com codigo {exc.returncode}.")
         return update_and_save(state)
 
-    selected = state.get("selected_dataset") or {}
     register_run(
         state,
         "extraction",
         {
             "dataset_path": rel_path(dataset_path),
+            "dataset_key": selected.get("dataset_key"),
             "scale_factor": selected.get("scale_factor"),
             "source": selected.get("source"),
         },
@@ -1358,12 +1640,8 @@ def run_training_sequence(
     if not state["workspace"]["extracao"]["ready"]:
         return state
     if state.get("selected_dataset") and not extraction_matches_selected_dataset(state):
-        if not ask_yes_no(
-            "A extracao ainda nao esta alinhada com o dataset ativo. Continuar usando os artefatos atuais mesmo assim?",
-            default=False,
-        ):
-            print("Treinamento cancelado para preservar o contexto do dataset ativo.")
-            return state
+        print("Treinamento cancelado porque a extração não corresponde ao dataset ativo.")
+        return state
 
     target = get_selected_model_target(state)
     training_plan, error = build_training_plan(target, split_config)
@@ -1371,17 +1649,32 @@ def run_training_sequence(
         print(f"[Erro] {error}")
         return update_and_save(state)
     assert training_plan is not None
+    selected = state.get("selected_dataset") or {}
+    dataset_key = selected.get("dataset_key") if isinstance(selected, dict) else None
+    dataset_path = selected.get("path") if isinstance(selected, dict) else None
+    scale_factor = selected.get("scale_factor") if isinstance(selected, dict) else None
 
     print_stage_context(state, "rodar o treinamento")
     print(f"Split selecionado    : {training_plan['split_config']}")
     print(f"Model dir de saída   : {rel_path(training_plan['model_dir'])}")
 
     try:
-        run_python_script(PREPARAR_SCRIPT)
+        prepare_args: list[str] = []
+        if dataset_key:
+            prepare_args.extend(["--dataset-key", str(dataset_key)])
+        if dataset_path:
+            prepare_args.extend(["--dataset-path", str(dataset_path)])
+        if scale_factor:
+            prepare_args.extend(["--scale-factor", str(scale_factor)])
+        run_python_script(PREPARAR_SCRIPT, prepare_args)
     except subprocess.CalledProcessError as exc:
         print(f"[Erro] preparacao_dados.py falhou com codigo {exc.returncode}.")
         return update_and_save(state)
-    register_run(state, "preparacao_dados")
+    register_run(
+        state,
+        "preparacao_dados",
+        {"dataset_key": dataset_key, "dataset_path": dataset_path},
+    )
     state = update_and_save(state)
 
     split_args = [
@@ -1394,12 +1687,26 @@ def run_training_sequence(
         "--seed",
         str(training_plan["split_config"]["seed"]),
     ]
+    if dataset_key:
+        split_args.extend(["--dataset-key", str(dataset_key)])
+    if dataset_path:
+        split_args.extend(["--dataset-path", str(dataset_path)])
+    if scale_factor:
+        split_args.extend(["--scale-factor", str(scale_factor)])
     try:
         run_python_script(DIVIDIR_SCRIPT, split_args)
     except subprocess.CalledProcessError as exc:
         print(f"[Erro] dividir_dataset.py falhou com codigo {exc.returncode}.")
         return update_and_save(state)
-    register_run(state, "split", dict(training_plan["split_config"]))
+    register_run(
+        state,
+        "split",
+        {
+            **dict(training_plan["split_config"]),
+            "dataset_key": dataset_key,
+            "dataset_path": dataset_path,
+        },
+    )
     state = update_and_save(state)
 
     train_args = ["--model-dir", str(training_plan["model_dir"])]
@@ -1416,6 +1723,12 @@ def run_training_sequence(
         train_args.append("--dataset-completo")
     elif training_cfg.get("catalogo_completo", bool(training_plan["experiment_id"])):
         train_args.append("--catalogo-completo")
+    if dataset_key:
+        train_args.extend(["--dataset-key", str(dataset_key)])
+    if dataset_path:
+        train_args.extend(["--dataset-path", str(dataset_path)])
+    if scale_factor:
+        train_args.extend(["--scale-factor", str(scale_factor)])
 
     try:
         run_python_script(TREINAR_SCRIPT, train_args)
@@ -1446,11 +1759,13 @@ def run_training_sequence(
                 otim_args.extend(
                     [
                         "--out-csv",
-                            str(target_results_root(target) / PESOS_EXPERIMENTOS_FILENAME),
+                        str(target_results_root(target, dataset_key) / PESOS_EXPERIMENTOS_FILENAME),
                         "--out-json",
-                            str(training_plan["model_dir"] / PESOS_OTIMOS_FILENAME),
+                        str(training_plan["model_dir"] / PESOS_OTIMOS_FILENAME),
                     ]
                 )
+            if dataset_key:
+                otim_args.extend(["--dataset-key", str(dataset_key)])
             try:
                 run_python_script(OTIMIZAR_PESOS_SCRIPT, otim_args)
             except subprocess.CalledProcessError as exc:
@@ -1482,6 +1797,8 @@ def run_training_sequence(
             "--seed",
             str(dataset_cfg.get("seed", training_plan["split_config"]["seed"])),
         ]
+        if dataset_key:
+            ltr_dataset_args.extend(["--dataset-key", str(dataset_key)])
         if isinstance(features_enabled, list) and features_enabled:
             ltr_dataset_args.extend(["--features", *[str(item) for item in features_enabled]])
 
@@ -1536,6 +1853,7 @@ def run_training_sequence(
         {
             "split_config": dict(training_plan["split_config"]),
             "selected_dataset_path": selected.get("path"),
+            "dataset_key": selected.get("dataset_key"),
             "extraction_dataset_path": last_extraction.get("dataset_path"),
             "model_target": dict(target),
             "model_dir": rel_path(training_plan["model_dir"]),
@@ -1556,6 +1874,8 @@ def run_evaluation_sequence(state: dict[str, Any], modes: list[str]) -> dict[str
     state = update_and_save(state)
     target = get_selected_model_target(state)
     family = str(target.get("family", "baseline_hibrido"))
+    selected = state.get("selected_dataset") or {}
+    dataset_key = selected.get("dataset_key") if isinstance(selected, dict) else None
     unsupported = [
         mode
         for mode in modes
@@ -1593,7 +1913,7 @@ def run_evaluation_sequence(state: dict[str, Any], modes: list[str]) -> dict[str
 
     print_stage_context(state, "rodar a avaliacao")
     model_dir = resolve_model_target_dir(target)
-    results_root = target_results_root(target)
+    results_root = target_results_root(target, dataset_key)
 
     for mode in modes:
         try:
@@ -1606,8 +1926,9 @@ def run_evaluation_sequence(state: dict[str, Any], modes: list[str]) -> dict[str
                     "10",
                     "20",
                 ]
-                if str(target.get("type", "modelo_padrao")) == "experimento_tcc":
-                    args.extend(["--out-dir", str(results_root / "offline")])
+                if dataset_key:
+                    args.extend(["--dataset-key", str(dataset_key)])
+                args.extend(["--out-dir", str(results_root / "offline")])
                 run_python_script(AVALIAR_MODELO_SCRIPT, args)
                 register_run(
                     state,
@@ -1622,14 +1943,11 @@ def run_evaluation_sequence(state: dict[str, Any], modes: list[str]) -> dict[str
                     "10",
                     "--peso-depois",
                     "0.10",
+                    "--out-json",
+                    str(results_root / "popularidade" / "metricas_antes_depois.json"),
                 ]
-                if str(target.get("type", "modelo_padrao")) == "experimento_tcc":
-                    args.extend(
-                        [
-                            "--out-json",
-                            str(results_root / "popularidade" / "metricas_antes_depois.json"),
-                        ]
-                    )
+                if dataset_key:
+                    args.extend(["--dataset-key", str(dataset_key)])
                 run_python_script(
                     AVALIAR_POPULARIDADE_SCRIPT,
                     args,
@@ -1645,16 +1963,14 @@ def run_evaluation_sequence(state: dict[str, Any], modes: list[str]) -> dict[str
                     },
                 )
             elif mode == "manual":
-                args = ["--model-dir", str(model_dir)]
-                if str(target.get("type", "modelo_padrao")) == "experimento_tcc":
-                    args.extend(
-                        [
-                            "--saida",
-                            str(results_root / "manual" / "avaliacao_manual.md"),
-                            "--saida-json",
-                            str(results_root / "manual" / "avaliacao_manual.json"),
-                        ]
-                    )
+                args = [
+                    "--model-dir",
+                    str(model_dir),
+                    "--saida",
+                    str(results_root / "manual" / "avaliacao_manual.md"),
+                    "--saida-json",
+                    str(results_root / "manual" / "avaliacao_manual.json"),
+                ]
                 run_python_script(AVALIACAO_MANUAL_SCRIPT, args)
                 register_run(
                     state,
@@ -1676,16 +1992,13 @@ def run_evaluation_sequence(state: dict[str, Any], modes: list[str]) -> dict[str
                     "300",
                     "--seed",
                     "42",
+                    "--out-csv",
+                    str(results_root / PESOS_EXPERIMENTOS_FILENAME),
+                    "--out-json",
+                    str(model_dir / PESOS_OTIMOS_FILENAME),
                 ]
-                if str(target.get("type", "modelo_padrao")) == "experimento_tcc":
-                    args.extend(
-                        [
-                            "--out-csv",
-                            str(results_root / PESOS_EXPERIMENTOS_FILENAME),
-                            "--out-json",
-                            str(model_dir / PESOS_OTIMOS_FILENAME),
-                        ]
-                    )
+                if dataset_key:
+                    args.extend(["--dataset-key", str(dataset_key)])
                 run_python_script(
                     OTIMIZAR_PESOS_SCRIPT,
                     args,
@@ -1762,12 +2075,8 @@ def action_run_tcc_benchmark(state: dict[str, Any]) -> dict[str, Any]:
     state = maybe_align_extraction_with_selected_dataset(state)
     state = update_and_save(state)
     if state.get("selected_dataset") and not extraction_matches_selected_dataset(state):
-        if not ask_yes_no(
-            "A extração ainda não está alinhada com o dataset ativo. Continuar mesmo assim no benchmark TCC?",
-            default=False,
-        ):
-            print("Benchmark cancelado para preservar o contexto do dataset ativo.")
-            return state
+        print("Benchmark cancelado porque a extração não corresponde ao dataset ativo.")
+        return state
 
     print(f"\nAlvo atual do benchmark: {benchmark_target_label(state)}")
     if ask_yes_no("Deseja reconfigurar quais modelos do benchmark serão executados?", default=False):
@@ -1776,8 +2085,19 @@ def action_run_tcc_benchmark(state: dict[str, Any]) -> dict[str, Any]:
             return state
 
     print_stage_context(state, "rodar os casos de uso do TCC")
+    selected = state.get("selected_dataset") or {}
+    dataset_key = selected.get("dataset_key") if isinstance(selected, dict) else None
+    dataset_path = selected.get("path") if isinstance(selected, dict) else None
+    scale_factor = selected.get("scale_factor") if isinstance(selected, dict) else None
+    benchmark_context = current_dataset_context(state)
     try:
         benchmark_args = ["--config", str(TCC_CONFIG_PATH)]
+        if dataset_key:
+            benchmark_args.extend(["--dataset-key", str(dataset_key)])
+        if dataset_path:
+            benchmark_args.extend(["--dataset-path", str(dataset_path)])
+        if scale_factor:
+            benchmark_args.extend(["--scale-factor", str(scale_factor)])
         benchmark_target = state.get("selected_benchmark", default_benchmark_target())
         if (
             isinstance(benchmark_target, dict)
@@ -1797,7 +2117,8 @@ def action_run_tcc_benchmark(state: dict[str, Any]) -> dict[str, Any]:
         "benchmark_tcc",
         {
             "config_path": rel_path(TCC_CONFIG_PATH),
-            "outputs": [rel_path(RESULTADOS_DIR / name) for name in BENCHMARK_TCC_OUTPUTS],
+            "dataset_key": dataset_key,
+            "outputs": [rel_path(benchmark_context.results_dir / name) for name in BENCHMARK_TCC_OUTPUTS],
             "selection": dict(state.get("selected_benchmark", default_benchmark_target())),
         },
     )

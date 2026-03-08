@@ -10,7 +10,8 @@ import numpy as np
 import pandas as pd
 from sklearn.metrics.pairwise import cosine_similarity
 
-from treinamento.model_utils import DADOS_DIR, load_model_metadata, resolve_model_dir
+from dataset_context import DADOS_ROOT_DIR, dataset_context_from_metadata
+from treinamento.model_utils import load_model_metadata, resolve_model_dir
 
 MS_POR_DIA = 86_400_000
 LAMBDA_DECAY = 0.01
@@ -43,6 +44,46 @@ class BaseArtifacts:
     posts_cache: pd.DataFrame
     user_tag_profile: pd.DataFrame | None
     metadata: dict[str, Any]
+
+
+@dataclass
+class QueryCoverage:
+    input_tags: list[str]
+    known_tags: list[str]
+    unknown_tags: list[str]
+
+    @property
+    def known_count(self) -> int:
+        return len(self.known_tags)
+
+    @property
+    def unknown_count(self) -> int:
+        return len(self.unknown_tags)
+
+    @property
+    def all_tags_oov(self) -> bool:
+        return bool(self.input_tags) and not self.known_tags
+
+    @property
+    def partial_oov(self) -> bool:
+        return bool(self.known_tags) and bool(self.unknown_tags)
+
+    @property
+    def coverage_ratio(self) -> float:
+        total = len(self.input_tags)
+        return float(self.known_count / total) if total > 0 else 0.0
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "input_tags": list(self.input_tags),
+            "known_tags": list(self.known_tags),
+            "unknown_tags": list(self.unknown_tags),
+            "known_count": int(self.known_count),
+            "unknown_count": int(self.unknown_count),
+            "all_tags_oov": bool(self.all_tags_oov),
+            "partial_oov": bool(self.partial_oov),
+            "coverage_ratio": float(self.coverage_ratio),
+        }
 
 
 def load_base_artifacts(model_dir: str | Path | None = None) -> BaseArtifacts:
@@ -79,7 +120,12 @@ def load_base_artifacts(model_dir: str | Path | None = None) -> BaseArtifacts:
             f"({len(posts_cache)} vs {post_matrix.shape[0]})."
         )
 
-    profile_path = DADOS_DIR / "user_tag_profile.parquet"
+    context = dataset_context_from_metadata(metadata)
+    profile_path = (
+        context.dados_dir / "user_tag_profile.parquet"
+        if context is not None
+        else (DADOS_ROOT_DIR / "user_tag_profile.parquet")
+    )
     user_tag_profile = (
         pd.read_parquet(profile_path) if profile_path.exists() else None
     )
@@ -97,11 +143,38 @@ def load_base_artifacts(model_dir: str | Path | None = None) -> BaseArtifacts:
     )
 
 
-def score_cosine(vectorizer: Any, post_matrix: np.ndarray, tags: list[str]) -> np.ndarray:
-    query = vectorizer.transform([tags]).astype(np.float32)
+def known_vocabulary(vectorizer: Any) -> set[str]:
+    return {str(tag) for tag in getattr(vectorizer, "classes_", [])}
+
+
+def build_query_coverage(vectorizer: Any, tags: list[str]) -> QueryCoverage:
+    tags_norm = normalize_query_tags(tags)
+    vocab = known_vocabulary(vectorizer)
+    known_tags = [tag for tag in tags_norm if tag in vocab]
+    unknown_tags = [tag for tag in tags_norm if tag not in vocab]
+    return QueryCoverage(
+        input_tags=tags_norm,
+        known_tags=known_tags,
+        unknown_tags=unknown_tags,
+    )
+
+
+def score_cosine_known_tags(
+    vectorizer: Any,
+    post_matrix: np.ndarray,
+    known_tags: list[str],
+) -> np.ndarray:
+    query = vectorizer.transform([known_tags]).astype(np.float32)
     if query.sum() == 0:
         return np.zeros(post_matrix.shape[0], dtype=np.float32)
     return cosine_similarity(query, post_matrix).flatten().astype(np.float32)
+
+
+def score_cosine(vectorizer: Any, post_matrix: np.ndarray, tags: list[str]) -> np.ndarray:
+    coverage = build_query_coverage(vectorizer, tags)
+    if not coverage.known_tags:
+        return np.zeros(post_matrix.shape[0], dtype=np.float32)
+    return score_cosine_known_tags(vectorizer, post_matrix, coverage.known_tags)
 
 
 def score_cooccurrence(
@@ -225,12 +298,21 @@ def build_feature_frame(
 ) -> pd.DataFrame:
     posts = artifacts.posts_cache
     tags_norm = normalize_query_tags(tags_entrada)
-    sc = score_cosine(artifacts.vectorizer, artifacts.post_matrix, tags_norm)
+    coverage = build_query_coverage(artifacts.vectorizer, tags_norm)
+    sc = (
+        score_cosine_known_tags(
+            artifacts.vectorizer,
+            artifacts.post_matrix,
+            coverage.known_tags,
+        )
+        if coverage.known_tags
+        else np.zeros(len(posts), dtype=np.float32)
+    )
     si = score_cooccurrence(
         artifacts.cooccurrence_map,
-        set(artifacts.vectorizer.classes_),
+        known_vocabulary(artifacts.vectorizer),
         posts["tags_fitness"],
-        tags_norm,
+        coverage.known_tags,
     )
     st = score_time_decay(posts, timestamp_entrada)
     ss = score_social(artifacts.social_scores, len(posts))
@@ -262,7 +344,7 @@ def build_feature_frame(
         0.40 * sc + 0.25 * si + 0.15 * st + 0.20 * ss + 0.10 * sp
     ) / (0.90 + 0.10)
 
-    return pd.DataFrame(
+    features = pd.DataFrame(
         {
             "catalog_index": posts.index.astype("int64"),
             "candidate_message_id": pd.to_numeric(
@@ -278,6 +360,18 @@ def build_feature_frame(
             "tag_overlap_count": np.array(tag_overlap_count, dtype=np.float32),
             "tag_jaccard": np.array(tag_jaccard, dtype=np.float32),
             "num_tags_candidate": np.array(num_tags_candidate, dtype=np.float32),
+            "query_known_tag_count": np.full(
+                len(posts), coverage.known_count, dtype=np.float32
+            ),
+            "query_oov_tag_count": np.full(
+                len(posts), coverage.unknown_count, dtype=np.float32
+            ),
+            "query_all_tags_oov": np.full(
+                len(posts), float(coverage.all_tags_oov), dtype=np.float32
+            ),
+            "query_tag_coverage_ratio": np.full(
+                len(posts), coverage.coverage_ratio, dtype=np.float32
+            ),
             "content_length": _safe_float_series(posts.get("content_length", 0.0)),
             "message_type_code": np.array(
                 [
@@ -300,3 +394,5 @@ def build_feature_frame(
             "baseline_score": baseline_score.astype(np.float32),
         }
     )
+    features.attrs["query_coverage"] = coverage.to_dict()
+    return features

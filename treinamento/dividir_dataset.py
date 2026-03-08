@@ -33,9 +33,11 @@ import numpy as np
 import pandas as pd
 
 ROOT = Path(__file__).resolve().parent.parent
-DADOS_DIR = ROOT / "treinamento" / "dados"
-SPLITS_DIR = DADOS_DIR / "splits"
-OUTPUT_DIR = ROOT / "extracao_filtragem" / "output"
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+
+from dataset_context import build_stage_manifest, dataset_context, rel_path, write_manifest
+from pipeline_contracts import normalize_split_config, split_signature
 
 PROPORCAO_TREINO_PADRAO = 0.70
 PROPORCAO_VAL_PADRAO = 0.15
@@ -100,6 +102,38 @@ def filtrar_interacoes(
 ) -> pd.DataFrame:
     """Filtra interações cujo post_idx_original pertence ao conjunto dado."""
     return interactions[interactions[coluna_idx].isin(post_idxs)].copy()
+
+
+def garantir_message_ids(posts: pd.DataFrame, output_dir: Path) -> pd.DataFrame:
+    posts = posts.copy()
+    if "_message_id" in posts.columns:
+        posts["_message_id"] = pd.to_numeric(posts["_message_id"], errors="coerce").astype("Int64")
+        if "message_id" not in posts.columns:
+            posts["message_id"] = posts["_message_id"]
+        return posts
+
+    if "message_id" in posts.columns:
+        posts["message_id"] = pd.to_numeric(posts["message_id"], errors="coerce").astype("Int64")
+        posts["_message_id"] = posts["message_id"]
+        return posts
+
+    msgs_path = output_dir / "messages_fitness.parquet"
+    if not msgs_path.exists():
+        raise FileNotFoundError(
+            "posts_metadata.parquet não contém message_id/_message_id e "
+            "messages_fitness.parquet não foi encontrado para reconstrução."
+        )
+
+    msgs_raw = pd.read_parquet(msgs_path)[["message_id"]].reset_index(drop=True)
+    if len(msgs_raw) != len(posts):
+        raise ValueError(
+            "Não foi possível alinhar posts_metadata.parquet com messages_fitness.parquet. "
+            "Regenere a preparação de dados com IDs explícitos."
+        )
+
+    posts["message_id"] = pd.to_numeric(msgs_raw["message_id"], errors="coerce").astype("Int64")
+    posts["_message_id"] = posts["message_id"]
+    return posts
 
 
 def recalcular_cooccurrence(posts_treino: pd.DataFrame) -> pd.DataFrame:
@@ -213,16 +247,71 @@ Exemplos:
                         help=f"Proporção de teste (padrão: {PROPORCAO_TESTE_PADRAO})")
     parser.add_argument("--seed", type=int, default=SEED_PADRAO,
                         help=f"Seed aleatória (padrão: {SEED_PADRAO})")
+    parser.add_argument(
+        "--dataset-key",
+        type=str,
+        default=None,
+        help="Namespace lógico do dataset; se omitido, usa layout legado",
+    )
+    parser.add_argument(
+        "--dataset-path",
+        type=str,
+        default=None,
+        help="Caminho opcional do dataset para registrar proveniência",
+    )
+    parser.add_argument(
+        "--scale-factor",
+        type=str,
+        default=None,
+        help="Scale factor opcional para registrar proveniência",
+    )
+    parser.add_argument(
+        "--dados-dir",
+        type=str,
+        default=None,
+        help="Override opcional do diretório de dados preparados",
+    )
+    parser.add_argument(
+        "--output-dir",
+        type=str,
+        default=None,
+        help="Override opcional do diretório de extração",
+    )
+    parser.add_argument(
+        "--splits-dir",
+        type=str,
+        default=None,
+        help="Override opcional do diretório de saída dos splits",
+    )
     args = parser.parse_args()
 
     validar_proporcoes(args.train, args.val, args.test)
 
+    context = dataset_context(
+        dataset_key=args.dataset_key,
+        dataset_path=args.dataset_path,
+        scale_factor=args.scale_factor,
+    )
+    dados_dir = Path(args.dados_dir) if args.dados_dir else context.dados_dir
+    if not dados_dir.is_absolute():
+        dados_dir = (ROOT / dados_dir).resolve()
+    output_dir = Path(args.output_dir) if args.output_dir else context.output_dir
+    if not output_dir.is_absolute():
+        output_dir = (ROOT / output_dir).resolve()
+    splits_dir = Path(args.splits_dir) if args.splits_dir else context.splits_dir
+    if not splits_dir.is_absolute():
+        splits_dir = (ROOT / splits_dir).resolve()
+
     print("=== Divisão do dataset ===")
+    print(f"  Namespace  : {context.dataset_key or 'legado'}")
+    print(f"  Dados      : {dados_dir}")
+    print(f"  Extração   : {output_dir}")
+    print(f"  Splits     : {splits_dir}")
     print(f"  Proporções : treino={args.train:.0%}  validação={args.val:.0%}  teste={args.test:.0%}")
     print(f"  Seed       : {args.seed}\n")
 
     # --- Carregar posts ---
-    posts_path = DADOS_DIR / "posts_metadata.parquet"
+    posts_path = dados_dir / "posts_metadata.parquet"
     if not posts_path.exists():
         print("ERRO: posts_metadata.parquet não encontrado.")
         print("Execute primeiro: python treinamento/preparacao_dados.py")
@@ -230,28 +319,23 @@ Exemplos:
 
     posts = pd.read_parquet(posts_path)
     posts["tags_fitness"] = posts["tags_fitness"].apply(_parse_tags)
+    posts = garantir_message_ids(posts, output_dir)
     # Índice posicional para rastrear a posição de cada post após o embaralhamento
     posts["post_idx_original"] = posts.index
     total = len(posts)
     print(f"  {total} posts carregados de {posts_path.name}")
 
-    # --- Carregar message_id original para cruzar com interações ---
-    # posts_metadata não expõe IDs na saída; carregamos messages_fitness para
-    # obter o message_id de cada posição e mapear para as interações.
-    inter_path = OUTPUT_DIR / "interactions_fitness.parquet"
-    msgs_path = OUTPUT_DIR / "messages_fitness.parquet"
-    social_path = OUTPUT_DIR / "user_social_graph.parquet"
-    has_interactions = inter_path.exists() and msgs_path.exists()
+    # --- Carregar interações e grafo social ---
+    inter_path = output_dir / "interactions_fitness.parquet"
+    social_path = output_dir / "user_social_graph.parquet"
+    has_interactions = inter_path.exists()
     has_social = social_path.exists()
 
     if has_interactions:
         interactions = pd.read_parquet(inter_path)
-        msgs_raw = pd.read_parquet(msgs_path)[["message_id"]].reset_index(drop=True)
-        # Cada linha i de posts_metadata corresponde à linha i de messages_fitness
-        posts["_message_id"] = msgs_raw["message_id"].values
         print(f"  {len(interactions)} interações carregadas de {inter_path.name}")
     else:
-        print("  [AVISO] interactions_fitness.parquet ou messages_fitness.parquet não encontrado — splits de interações ignorados")
+        print("  [AVISO] interactions_fitness.parquet não encontrado — splits de interações ignorados")
 
     social_graph = pd.DataFrame()
     if has_social:
@@ -265,27 +349,31 @@ Exemplos:
     train, val, test = dividir_posts(posts, args.train, args.val, args.seed)
 
     # --- Filtrar interações por split ---
-    SPLITS_DIR.mkdir(parents=True, exist_ok=True)
+    splits_dir.mkdir(parents=True, exist_ok=True)
 
     splits_posts = [("train", train), ("val", val), ("test", test)]
     for nome, df in splits_posts:
-        caminho = SPLITS_DIR / f"{nome}_posts.parquet"
+        caminho = splits_dir / f"{nome}_posts.parquet"
         # Mantém colunas internas para rastreabilidade dos experimentos e benchmark.
         df.to_parquet(caminho, index=True)
         print(f"  {nome}_posts.parquet salvo: {len(df)} posts")
 
+    train_inter_count = 0
+    social_scores_train_count = 0
     if has_interactions:
         for nome, df in splits_posts:
             msg_ids = set(df["_message_id"].tolist())
             df_inter = interactions[interactions["message_id"].isin(msg_ids)].copy()
-            caminho = SPLITS_DIR / f"{nome}_interactions.parquet"
+            caminho = splits_dir / f"{nome}_interactions.parquet"
             df_inter.to_parquet(caminho, index=False)
             print(f"  {nome}_interactions.parquet salvo: {len(df_inter)} interações")
+            if nome == "train":
+                train_inter_count = int(len(df_inter))
 
     # --- Recalcular co-ocorrência SÓ com treino (evita data leakage) ---
     print("\nRecalculando tag_cooccurrence com dados de treino...")
     cooc_treino = recalcular_cooccurrence(train)
-    caminho_cooc = SPLITS_DIR / "train_tag_cooccurrence.parquet"
+    caminho_cooc = splits_dir / "train_tag_cooccurrence.parquet"
     cooc_treino.to_parquet(caminho_cooc, index=False)
     print(f"  train_tag_cooccurrence.parquet salvo: {len(cooc_treino)} pares de tags")
 
@@ -295,9 +383,10 @@ Exemplos:
         train_msg_ids = set(train["_message_id"].tolist())
         train_inter = interactions[interactions["message_id"].isin(train_msg_ids)].copy()
         social_scores_treino = recalcular_social_scores(train, train_inter, social_graph)
-        caminho_social_scores = SPLITS_DIR / "train_social_scores.parquet"
+        caminho_social_scores = splits_dir / "train_social_scores.parquet"
         social_scores_treino.to_parquet(caminho_social_scores, index=True)
         score_medio = social_scores_treino["social_score"].mean()
+        social_scores_train_count = int(len(social_scores_treino))
         print(f"  train_social_scores.parquet salvo: {len(social_scores_treino)} posts")
         print(f"  Score médio de influência social: {score_medio:.4f}")
     else:
@@ -305,7 +394,40 @@ Exemplos:
 
     # --- Resumo final ---
     imprimir_resumo(total, train, val, test, args.train, args.val, args.seed)
-    print(f"Splits salvos em: {SPLITS_DIR}")
+    split_cfg_payload = normalize_split_config(
+        {
+            "train": args.train,
+            "val": args.val,
+            "test": args.test,
+            "seed": args.seed,
+        }
+    )
+    manifest = build_stage_manifest(
+        stage="divisao_dataset",
+        context=context,
+        extra={
+            "dados_dir": rel_path(dados_dir),
+            "output_dir": rel_path(output_dir),
+            "splits_dir": rel_path(splits_dir),
+            "split_config": split_cfg_payload,
+            "split_signature": split_signature(split_cfg_payload),
+            "data_contract": {
+                "post_id_column": "_message_id",
+                "interaction_message_column": "message_id",
+                "timestamp_unit": "ms",
+            },
+            "summary": {
+                "total_posts": int(total),
+                "train_posts": int(len(train)),
+                "val_posts": int(len(val)),
+                "test_posts": int(len(test)),
+                "train_interactions": train_inter_count,
+                "social_scores_train": social_scores_train_count,
+            },
+        },
+    )
+    write_manifest(splits_dir, manifest)
+    print(f"Splits salvos em: {splits_dir}")
 
 
 if __name__ == "__main__":

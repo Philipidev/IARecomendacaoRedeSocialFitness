@@ -13,8 +13,8 @@
 %%%%%%%%%%%%%%%%%%%%%%%%%%
 
 %\setcounter{page}{80} %iniciar contador de pagina de valor especificado, quando o artigo for alocado a uma edição
-\newcommand{\monog}{FitConnect: rede social de atividade física com interação social, geolocalização e privacidade}
-\newcommand{\monogES}{FitConnect: a \textit{social network} for physical activity with geolocation and privacy-preserving features}
+\newcommand{\monog}{Personalização de Conteúdo Fitness em Rede Social por meio de um Sistema de Recomendação Híbrido}
+\newcommand{\monogES}{Fitness Content Personalization in Social Networks through a Hybrid Recommender System}
 \newcommand{\origem}{Brasil}
 \newcommand{\editorial}{\textbf{Abakós}, Belo Horizonte, v. 8, n. 2, p. 00-00, Jul. 2021 - ISSN: 2316-9451}  % p. xx-xx – páginas inicial-final do artigo
 % \newcommand{\lcc}{\scriptsize{Licença Creative Commons Attribution-NonCommercial-NoDerivs 3.0 Unported}}
@@ -72,8 +72,8 @@
 
 \begin{abstract}
 \noindent
-Este artigo apresenta o desenvolvimento de um aplicativo baseado em Inteligência Artificial (IA), com foco na prática de atividade física e melhora de hábitos saudáveis. Utilizando Smart Nudges e IA de recomendação como filtragem colaborativa neural (NCF), o sistema conecta pessoas para treinar juntas por meio de descoberta por proximidade, recomendação contextual, com privacidade por padrão. A interface web e app, construídas com as linguagens React, C\texttt{\#} e React Native, organiza posts que registram treinos, alimentam o feed e permitem controles claros de visibilidade e compartilhamento. O sistema permite interação através de postagem, curtidas e compartilhamentos e agendamento de treinos em conjunto. Durante os testes, foram obtidas métricas de desempenho como redução de 96,6\% no erro de previsão do modelo de recomendação. Na etapa de recomendação de atividades e de perfis, o sistema foi avaliado em cenários práticos, alcançando 100\% de acerto nos cenários de validação dos Smart Nudges, resultando em uma indicação correta adaptada ao perfil do usuário.
-\\\textbf{\keyword{Palavras-chave: }}Rede Social, Atividade Física, Sistemas de Recomendação, Inteligência Artificial
+Este trabalho apresenta o desenvolvimento e a avaliação de um sistema de recomendação voltado à personalização de conteúdo sobre atividade física em uma rede social. A proposta utiliza como base experimental a base de dados LDBC SNB, da qual são extraídos posts, interações, interesses declarados e relações sociais associados a esse domínio. Sobre esses dados, foi estruturado um fluxo reproduzível de preparação, separação em treino, validação e teste, treinamento e avaliação. O sistema de recomendação combina sinais de similaridade de conteúdo, coocorrência de \textit{tags}, recência, popularidade e influência do grafo social em um modelo híbrido de referência explicável, além de incluir uma trilha de aprendizado para ranqueamento (\textit{Learning to Rank}) com \textit{LightGBMRanker} para comparação entre modelos. A avaliação é organizada por meio de uma comparação entre múltiplos modelos, considerando métricas de ranqueamento e indicadores complementares de cobertura, diversidade, novidade e latência. Como principal contribuição, o trabalho consolida uma arquitetura experimental rastreável para o estudo da recomendação de conteúdo \textit{fitness} em contexto social, permitindo comparar abordagens de ranqueamento sob um mesmo protocolo de dados e avaliação.
+\\\textbf{\keyword{Palavras-chave: }}Sistemas de Recomendação, Aprendizado para Ranqueamento, Grafo Social, Atividade Física
 \end{abstract}
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
@@ -81,8 +81,8 @@ Este artigo apresenta o desenvolvimento de um aplicativo baseado em Inteligênci
 \selectlanguage{english}
 \begin{abstract}
 \noindent
-This article presents the development of an Artificial Intelligence (AI)-based application focused on physical activity and the improvement of healthy habits. Using Smart Nudges and AI like neural collaborative filtering (NCF), the system connects people to train together through proximity-based discovery, contextual recommendation, with privacy by default. The web and app interface, built with React, C\texttt{\#} and React Native, organizes posts that record workouts, populate the feed, and enable clear controls over visibility and sharing. The system allows interaction through posting, likes and shares, as well as scheduling joint training sessions. During testing, performance metrics were obtained such as a 96.6\% reduction in prediction error for the recommendation model. In the activity and profile recommendation stage, the system was evaluated in practical scenarios, achieving 100\% accuracy in Smart Nudges validation scenarios, resulting in an accurate recommendation tailored to the user's profile.
-\\\textbf{\keyword{Keywords: }}Social Network, Physical Activity, Recommendation Systems, Artificial Intelligence
+This work presents the development and evaluation of a recommender system aimed at personalizing fitness-related content in a social network. The proposal uses the LDBC SNB dataset as its experimental basis, from which posts, interactions, declared interests, and social relationships associated with physical activity are extracted. On top of these data, a reproducible pipeline was structured for data preparation, train-validation-test splitting, training, and evaluation. The recommender combines content similarity, tag co-occurrence, recency, popularity, and social graph influence in an explainable hybrid baseline, while also including a Learning to Rank track with LightGBMRanker for model comparison. Evaluation is organized through a multi-model benchmark that considers ranking metrics as well as complementary indicators of coverage, diversity, novelty, and latency. As its main contribution, the work consolidates a traceable experimental architecture for studying fitness content recommendation in a social context, allowing ranking approaches to be compared under a common data and evaluation protocol.
+\\\textbf{\keyword{Keywords: }}Recommendation Systems, Learning to Rank, Social Graph, Physical Activity
 \end{abstract}
 
 \newpage
@@ -96,582 +96,355 @@ This article presents the development of an Artificial Intelligence (AI)-based a
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
 \section{Introdução}
+A prática insuficiente de atividade física permanece um desafio relevante de saúde pública no Brasil. Dados do Vigitel indicam que os níveis de atividade física observados nas capitais brasileiras ainda demandam políticas e estratégias capazes de reduzir o sedentarismo e ampliar a adoção de rotinas ativas \cite{Vigitel2023}. Em paralelo, a Organização Mundial da Saúde recomenda, para adultos, entre 150 e 300 minutos semanais de atividade aeróbica moderada, parâmetro que ainda não é alcançado por parcela expressiva da população \cite{WHO2020}.
 
-A prática insuficiente de atividade física permanece um desafio relevante de saúde pública no Brasil. Dados recentes do \cite{Vigitel2023} indicam que os indicadores de atividade física nas capitais ainda exigem políticas e soluções que reduzam o sedentarismo e promovam rotinas ativas. Em linha com as diretrizes da Organização Mundial da Saúde, recomenda-se, para adultos, ao menos 150 a 300 minutos semanais de atividade aeróbica moderada, meta que parcela expressiva da população não alcança \cite{WHO2020}.
+Nesse cenário, intervenções digitais voltadas ao acompanhamento e ao estímulo da atividade física vêm recebendo atenção crescente, sobretudo quando buscam adaptar conteúdos ao contexto do usuário \cite{Agans2025PARecommender,Venka2022CARS}. Contudo, a simples disponibilização de conteúdos em plataformas digitais não garante que cada pessoa receba informações compatíveis com seus interesses, seu momento de uso e sua realidade social.
 
-Nesse contexto, intervenções digitais voltadas à promoção da saúde têm se mostrado promissoras, especialmente quando incorporam elementos sociais, metas e mecanismos de engajamento. Ensaios randomizados controlados apontam efeitos positivos do uso de recursos como metas progressivas, sobretudo quando tais elementos são adequadamente ajustados ao perfil do público-alvo \cite{SANUDO2024102590}. Nesse sentido, recomendações individualizadas tornam-se mais úteis e acionáveis quando consideram não apenas preferências do usuário, mas também informações contextuais, como localização, horário, rotina e restrições.
+Em ambientes com grande volume de itens e interações, essa adaptação depende de mecanismos capazes de selecionar e ordenar conteúdos segundo critérios de relevância. É nesse ponto que se inserem os sistemas de recomendação, entendidos neste trabalho como mecanismos computacionais voltados à seleção e ao ranqueamento de itens potencialmente mais relevantes para cada usuário.
 
-Diante desse cenário, este trabalho tem como foco investigar o uso de uma Inteligência Artificial de recomendação aplicada ao incentivo à prática de atividades físicas. A proposta central consiste no desenvolvimento e estudo de um sistema capaz de recomendar, de forma personalizada, atividades, locais de prática e possibilidades de interação com usuários de perfil semelhante, considerando características individuais, histórico de uso, contexto e proximidade. Assim, o núcleo do trabalho não está no aplicativo em si, mas no modelo de recomendação que sustenta a personalização das sugestões e busca favorecer maior aderência à prática de exercícios físicos.
+Em serviços digitais, esses sistemas exercem papel estratégico na organização da informação \cite{GomezUribe2016Netflix}. No domínio da atividade física, sua utilidade tende a crescer quando também consideram sinais sociais, uma vez que interações entre pares podem influenciar comportamento e engajamento \cite{Franken2023}. Desse modo, o problema investigado neste trabalho não se limita à oferta de conteúdo, mas à construção de um processo de ordenação que articule conteúdo, contexto temporal e relações sociais.
 
-Para viabilizar a implementação e a avaliação dessa proposta, o modelo de recomendação foi integrado ao FitConnect, aplicativo concebido como interface de interação entre usuário e sistema. No aplicativo, os usuários podem publicar registros sobre as atividades que realizam e os locais em que treinam, gerando dados que alimentam o processo de recomendação. A partir dessas informações, a IA organiza sugestões com base em proximidade, interesse e similaridade entre perfis, oferecendo ao usuário recomendações mais relevantes e contextualizadas.
+Diante desse problema, este trabalho propõe o desenvolvimento e a avaliação de um sistema de recomendação para uma rede social voltada à atividade física, tomando o aplicativo FitConnect como ambiente de interação e coleta de sinais, e não como foco principal da monografia. Para viabilizar essa investigação, o estudo utiliza dados extraídos do LDBC SNB \cite{Angles2020LDBCSNB} e organiza um fluxo reproduzível de preparação, treinamento, validação e avaliação dos modelos.
 
-Em síntese, este trabalho propõe o desenvolvimento de um sistema de recomendação baseado em Inteligência Artificial, integrado a um aplicativo social de apoio à prática de atividades físicas. A contribuição principal consiste em investigar de que maneira recomendações personalizadas e contextuais podem favorecer o engajamento, a regularidade e a aproximação entre usuários com interesses e perfis semelhantes, tendo o aplicativo como ambiente de coleta de dados, interação e disponibilização das recomendações.
+A solução investigada combina similaridade de conteúdo, coocorrência de marcadores temáticos (\textit{tags}), recência, popularidade e informação do grafo social em um modelo híbrido de referência. Em complemento, incorpora uma trilha de aprendizado para ranqueamento (\textit{Learning to Rank}), permitindo comparar diferentes estratégias de recomendação sob um mesmo protocolo experimental. A contribuição central do trabalho consiste em estruturar e comparar, em um mesmo ambiente experimental, abordagens de recomendação capazes de explorar sinais de conteúdo, interação e relações sociais para apoiar a personalização de conteúdos sobre atividade física.
 
-O restante do artigo está organizado da seguinte forma: na Seção 2, são apresentados os fundamentos teóricos, com destaque para Sistemas de Recomendação e Gamificação em Saúde Digital. A Seção 3 analisa os trabalhos correlatos, enquanto a Seção 4 descreve a metodologia adotada. Na Seção 5, discutem-se os experimentos realizados e os resultados obtidos.
+Além desta introdução, a Seção 2 apresenta a fundamentação teórica sobre inteligência artificial, sistemas de recomendação e métricas de avaliação; a Seção 3 discute os trabalhos correlatos; a Seção 4 descreve a metodologia adotada, com destaque para materiais e método; a Seção 5 apresenta os experimentos e resultados; e, por fim, a Seção 6 traz a conclusão do trabalho.
+
+
+
 
 
 \section{Fundamentação Teórica}
 
-Esta seção apresenta os fundamentos teóricos do trabalho, abrangendo sistemas de recomendação e gamificação em saúde digital. Sintetizam-se definições, famílias e sinais usados na personalização, bem como princípios de motivação e reforço social, com atenção à transparência e à privacidade.
+Esta seção apresenta os conceitos centrais que sustentam a proposta desenvolvida no trabalho. O foco recai sobre sistemas de recomendação, modelos híbridos, sinais de ranqueamento, aprendizado para ranqueamento e métricas de avaliação, de modo a explicar os principais termos introduzidos nas seções anteriores.
 
-\subsection{Sistemas de Recomendação}
+\subsection{Inteligência Artificial e Sistemas de Recomendação}
 
-O FitConnect foi estruturado em um \textit{pipeline} de três estágios sequenciais, combinando dois modelos de Inteligência Artificial com regras de código para otimizar eficiência e interpretabilidade:
-\begin{enumerate}
-    \item Recuperação (\textit{Retrieval}) -- Código: o sistema aplica filtros simples baseados em regras para selecionar rapidamente candidatos relevantes. São aplicados critérios como modalidade preferida do usuário, frescor do conteúdo (posts dos últimos 14 dias) e compatibilidade de visibilidade. Esta etapa reduz o universo de 50.000 posts para aproximadamente 2.000 candidatos em milissegundos, sem necessidade de modelo neural.
+No contexto deste trabalho, a Inteligência Artificial é compreendida como o conjunto de métodos computacionais utilizados para apoiar decisões automáticas a partir de dados. Entre essas aplicações, os sistemas de recomendação ocupam papel relevante por permitirem selecionar e ordenar conteúdos potencialmente mais úteis para cada usuário em ambientes com grande volume de informação \cite{10.1145/3285029,GomezUribe2016Netflix}.
 
-    
-    
-    \item Pontuação (\textit{Scoring}) -- Inteligência Artificial: os candidatos selecionados são pontuados pelo modelo \textit{Neural Collaborative Filtering} (NCF), uma rede neural que aprende representações vetoriais (\textit{embeddings}) de usuários e itens a partir do histórico de interações. O NCF combina duas abordagens: fatoração matricial generalizada (GMF), que captura interações lineares, e um perceptron multicamadas (MLP), que modela padrões não lineares complexos. Para usuários novos (\textit{cold start}), o sistema utiliza um modelo de \textit{Popularity Baseline} que recomenda conteúdos populares com decaimento temporal.
-    
-    \item Reordenação (\textit{Re-ranking}) -- Código: a lista é ajustada por regras de impulso contextuais: aumento de 30\% na pontuação para posts de autores seguidos pelo usuário, 20\% para posts da modalidade preferida, e 50\% quando amigos interagiram com o conteúdo. Estas regras são interpretáveis e ajustáveis sem necessidade de re-treinamento do modelo.
-\end{enumerate}
-Para facilitar a compreensão dos conceitos técnicos utilizados, a Tabela \ref{tab:glossario_ia} apresenta um glossário simplificado dos principais termos. Em seguida, a Tabela \ref{tab:ia_vs_codigo} sintetiza a distinção entre os componentes de IA e código no \textit{pipeline}.
+Em termos gerais, um sistema de recomendação busca estimar a relevância de itens, como filmes, músicas, produtos ou publicações, com base em sinais observáveis do contexto, do conteúdo e do comportamento dos usuários. No domínio da atividade física, revisões recentes indicam que esses sistemas podem contribuir para tornar intervenções digitais mais aderentes ao perfil e ao momento de uso de cada pessoa \cite{Venka2022CARS,Agans2025PARecommender}.
+
+\subsubsection{Filtragem baseada em conteúdo}
+
+A filtragem baseada em conteúdo parte das características do próprio item recomendado. Em vez de depender exclusivamente do comportamento coletivo dos usuários, ela compara descritores dos itens com o perfil de interesse do usuário ou com a descrição do item de referência. No presente trabalho, esse princípio aparece principalmente no uso de marcadores temáticos, denominados \textit{tags}, para representar semanticamente o conteúdo das publicações.
 
 
-\begin{table}[htbp]
-\centering
-\caption{Glossário de termos técnicos utilizados no sistema de recomendação}
-\label{tab:glossario_ia}
-\begin{tabular}{|p{3.2cm}|p{5.5cm}|p{5.5cm}|}
-\hline
-\textbf{Termo} & \textbf{Definição Simplificada} & \textbf{Aplicação no FitConnect} \\
-\hline
-\textit{Retrieval} (Recuperação) & Processo de filtrar rapidamente itens para encontrar candidatos relevantes. & Filtro por código seleciona 2.000 posts por modalidade e frescor. \\
-\hline
-\textit{Scoring} (Pontuação) & Atribuição de nota de relevância para cada item candidato. & Modelo NCF (IA) avalia probabilidade do usuário gostar de cada post. \\
-\hline
-\textit{Re-ranking} (Reordenação) & Ajuste final da ordem considerando contexto. & Regras de impulso (+30\% seguido, +20\% modalidade) por código. \\
-\hline
-\textit{Embeddings} & Representação de usuários/itens como vetores numéricos. & NCF aprende vetores de 64 dimensões para cada usuário e post. \\
-\hline
-GMF (\textit{Generalized Matrix Factorization}) & Foca em relações diretas. Exemplo: "Se você curte musculação, vai gostar de posts de musculação." & Componente do NCF que captura padrões lineares e óbvios. \\
-\hline
-MLP (\textit{Multi-Layer Perceptron}) &Foca em relações complexas. Exemplo: "Quem treina de manhã e gosta de yoga, costuma curtir receitas fit." & Componente do NCF que aprende padrões profundos e não óbvios. \\
-\hline
-\textit{Popularity Baseline} & Estatística de Tendência. Não é uma rede neural treinada, mas um cálculo matemático do que está em alta no momento entre todos os usuários. & \textit{Fallback} para usuários novos (\textit{cold start}) até que eles tenham histórico próprio. \\
-\hline
-\textit{Cold Start} & Problema de recomendar para usuários novos sem histórico. & Situação onde o sistema ignora a personalização e usa a Popularidade. \\
-\hline
-\textit{Nudges} & Estímulos comportamentais sutis para motivar ação. & Regras de negócio geram notificações baseadas em dados de saúde. \\
-\hline
-\end{tabular}
-\end{table}
+\subsubsection{Filtragem colaborativa}
+
+A filtragem colaborativa procura identificar padrões de interesse a partir do comportamento agregado de diferentes usuários. Sua ideia central é que interações passadas podem revelar relações úteis entre usuários, itens ou grupos de itens, permitindo inferir preferências prováveis mesmo quando os conteúdos não são idênticos \cite{10.1145/3285029}. No projeto desenvolvido, esse princípio não é utilizado por meio de redes neurais, mas por sinais derivados das interações observadas e das associações entre \textit{tags}.
 
 
-\begin{table}[htbp]
-\centering
-\caption{Distinção entre componentes de IA e código no \textit{pipeline} de recomendação}
-\label{tab:ia_vs_codigo}
-\begin{tabular}{|l|l|l|p{5.5cm}|}
-\hline
-\textbf{Estágio} & \textbf{Tipo} & \textbf{Componente} & \textbf{Função} \\
-\hline
-Recuperação & Código & Filtro Simples & Filtra por modalidade, frescor e privacidade \\
-\hline
-Pontuação & IA Neural & NCF & Aprende preferências usuário-item via \textit{embeddings} \\
-\hline
-Pontuação & IA Estatística & Popularity & \textit{Fallback} para \textit{cold start} \\
-\hline
-Reordenação & Código & Boost Rules & Ajuste contextual (+30\% seguido, +20\% modalidade) \\
-\hline
-\end{tabular}
-\end{table}
+\subsubsection{Modelos híbridos}
 
-O diferencial da arquitetura do FitConnect é a integração de dados de atividade física à esse processo. O sistema processa sinais de dispositivos vestíveis (\textit{wearables}), como qualidade do sono, frequência cardíaca e intensidade de treinos recentes. Estes dados alimentam um sistema complementar de \textit{Smart Nudges}, que são notificações motivacionais. Elas operam por regras de negócio baseadas em fisiologia do exercício, sem uso de IA, garantindo interpretabilidade e controle sobre as recomendações de saúde.
+Modelos híbridos combinam diferentes fontes de evidência em um mesmo processo de recomendação. Essa estratégia é relevante porque permite articular características do conteúdo, padrões coletivos de interação e informações contextuais em uma única função de ranqueamento \cite{Venka2022CARS}. No escopo deste trabalho, a expressão modelo híbrido de referência explicável designa uma abordagem em que cada sinal possui significado claro e contribuição interpretável no cálculo do escore final.
+
+\subsection{Sinais de ranqueamento do modelo proposto}
+
+Como a proposta do trabalho não depende de um único critério de relevância, o sistema utiliza múltiplos sinais para ordenar os candidatos. A combinação desses sinais forma o modelo híbrido de referência explicável mencionado na introdução.
+
+\subsubsection{Similaridade de conteúdo}
+
+Similaridade de conteúdo é o grau de proximidade temática entre dois itens. Quando dois posts compartilham marcadores semânticos semelhantes, entende-se que tratam de assuntos próximos, o que aumenta a chance de um deles ser relevante para quem demonstrou interesse no outro. No projeto, essa ideia é operacionalizada por meio da comparação entre vetores de \textit{tags}.
+
+\subsubsection{Coocorrência de \textit{tags}}
+
+Coocorrência de \textit{tags} corresponde à frequência com que determinados marcadores aparecem juntos em um mesmo conjunto de dados. Quando duas \textit{tags} surgem repetidamente associadas nas publicações, essa relação pode ser explorada como indício de proximidade temática ou comportamental. Assim, a coocorrência amplia a recomendação para além da coincidência exata de marcadores, permitindo recuperar conteúdos relacionados.
+
+\subsubsection{Recência}
+
+Recência é o sinal temporal que favorece itens mais recentes ou mais próximos do momento de referência da consulta. Em plataformas dinâmicas, a relevância de um conteúdo não depende apenas do tema, mas também de sua posição no tempo. Por isso, modelos de recomendação frequentemente incorporam mecanismos de decaimento temporal para reduzir o peso de conteúdos muito antigos em relação ao contexto atual.
 
 
 
+\subsubsection{Popularidade}
 
-\subsection{Gamificação em Saúde Digital}
+Popularidade representa o interesse coletivo acumulado em torno de um item ou de um grupo de itens. Em termos práticos, ela pode ser estimada por volume de interações, frequência de acesso ou intensidade de engajamento. No sistema proposto, esse sinal funciona como evidência complementar de relevância, especialmente útil quando se deseja considerar o comportamento agregado da comunidade.
 
-Gamificação é definida como o uso de elementos de design de jogos em contextos não lúdicos para aumentar a motivação e o engajamento, incorporando mecânicas específicas como pontos, \textit{ranking}, barras de progresso e recompensas em aplicações existentes, sem necessariamente criar uma experiência de jogo completa. No contexto de saúde móvel, a gamificação tem sido aplicada como estratégia para promover mudanças comportamentais sustentáveis, aproveitando mecanismos psicológicos de recompensa e competição para incentivar a adoção e manutenção de hábitos saudáveis. 
+\subsubsection{Influência do grafo social}
 
-A eficácia de intervenções gamificadas fundamenta-se em sua capacidade de atender necessidades psicológicas básicas propostas pela Teoria da Autodeterminação, que identifica autonomia, competência e pertencimento como pilares da motivação intrínseca, forma de motivação mais robusta e duradoura quando comparada à motivação extrínseca dependente de recompensas externas \cite{10.2196/27794}.
+O grafo social é a representação das relações entre usuários na forma de nós e conexões. Quando esse tipo de estrutura é incorporado à recomendação, torna-se possível considerar não apenas o conteúdo consumido, mas também a posição social de quem interage com ele. Em redes sociais voltadas à atividade física, interações entre pares podem influenciar engajamento e comportamento, o que justifica o uso de sinais associados à estrutura social no processo de ranqueamento \cite{Franken2023}.
 
-Evidências empíricas demonstram que intervenções gamificadas orientadas à comparação social podem promover melhorias significativas em atividade física e bem-estar. \citeonline{SANUDO2024102590} conduziram ensaio randomizado controlado com jovens adultos no qual elementos de gamificação como quadros de líderes e barras de progresso resultaram em aumentos mensuráveis em atividade física moderada, funcionamento físico e bem-estar emocional. 
+\subsection{Aprendizado para ranqueamento}
 
-\citeonline{10.2196/27794} corroboraram esses achados em revisão sistemática de 50 estudos empíricos, identificando que intervenções guiadas por teorias comportamentais e que combinavam múltiplos elementos de jogo, apresentaram efetividade superior àquelas que utilizaram elementos isolados, reforçando a importância da integração entre gamificação e sinais fisiológicos capturados por dispositivos pessoais.
+Ranquear significa ordenar itens de acordo com um critério de relevância. Em muitos problemas de recomendação, não basta decidir se um item é potencialmente adequado; é necessário determinar também em que posição ele deve aparecer para o usuário. O aprendizado para ranqueamento (\textit{Learning to Rank}) corresponde à família de métodos supervisionados que aprendem essa ordenação a partir de exemplos previamente observados \cite{Burges2010LTROverview}.
 
-No FitConnect, a estratégia de gamificação se materializa através de quadros de líderes, barras de progresso, trends compartilhados e sistema de recompensas sociais, aproveitando a comparação social como motivador para a prática regular de atividade física. 
+Diferentemente de um modelo com pesos definidos manualmente, o \textit{Learning to Rank} busca estimar, a partir dos dados, como cada atributo deve influenciar a ordem final dos itens. Em aplicações de recomendação, isso permite aprender combinações mais ajustadas entre sinais de conteúdo, interação e contexto, reduzindo a dependência de calibração exclusivamente manual.
 
-Essa camada é potencializada pelo sistema de recomendação multirrelacional, que personaliza a experiência gamificada ao sugerir metas adaptativas calibradas pelo histórico e contexto do usuário, compor \textit{ranking} segmentados por nível de condicionamento para evitar desmotivação por comparações desproporcionais, recomendar companhias de treino por afinidade de perfil e proximidade geográfica, e priorizar conquistas alinhadas aos objetivos individuais, integrando os fundamentos da filtragem colaborativa heterogênea com os mecanismos de engajamento da gamificação orientada à autodeterminação.
+\subsubsection{O algoritmo \textit{LightGBMRanker}}
+
+O \textit{LightGBMRanker} é um algoritmo utilizado em tarefas de ranqueamento, isto é, em problemas nos quais o objetivo principal é ordenar itens conforme sua relevância. No contexto deste trabalho, ele é empregado como uma abordagem comparativa ao modelo híbrido de referência, permitindo investigar uma alternativa em que a ordenação dos conteúdos é aprendida a partir dos dados, e não definida apenas por pesos estabelecidos manualmente \cite{Burges2010LTROverview,Ke2017LightGBM}.
+
+Nesta seção, basta compreendê-lo como um método de aprendizado para ranqueamento aplicado à organização de conteúdos em ordem de relevância. Os detalhes de sua utilização no presente trabalho, incluindo os atributos empregados, a preparação dos dados e sua comparação com o modelo híbrido, serão apresentados de forma mais detalhada na metodologia e na análise dos resultados.
+
+\subsection{Métricas de avaliação de ranqueamento}
+
+Em tarefas de ranqueamento, a avaliação precisa considerar não apenas se um item relevante foi recuperado, mas também a posição em que ele aparece na lista. Por essa razão, métricas de ordenação são particularmente importantes na análise de sistemas de recomendação.
+
+Neste trabalho, destacam-se duas métricas principais. A \textit{Normalized Discounted Cumulative Gain} (\textit{NDCG}) permite avaliar se os itens mais relevantes estão concentrados nas primeiras posições da lista \cite{Jarvelin2002NDCG}. Já a \textit{Mean Reciprocal Rank} (\textit{MRR}) enfatiza quão cedo surge o primeiro item relevante para cada consulta \cite{Craswell2009MRR}. A formulação detalhada dessas métricas, bem como sua aplicação no protocolo experimental adotado, será apresentada nas seções de metodologia e de resultados.
+
+
 
 
 \section{Trabalhos Correlatos}
 
-A gamificação em aplicativos tem revolucionado a experiência de uso e aumentado significativamente a adesão dos usuários. Nos ensaios de campo em \cite{Grech2024GamificationPA} mostram que combinações de pontos, \textit{badges} e \textit{ranking} produzem efeitos distintos sobre motivação e passos, exigindo testes e arranjos cuidadosos. Em \cite{Edney2020ActiveTeam}, um ensaio randomizado por clusters com app social gamificado indica ganhos quando o jogo é acoplado a reforço social estruturado como, \textit{feed}, grupos e desafios.
 
-Seguindo essa linha, \cite{Hirsch2014} utiliza registros geolocalizados para mapear uso de parques, rotas e desigualdades de acesso. Esses dados ajudam a planejar a oferta de locais e políticas de incentivo, para que os usuários se mantenham mais engajados com o aplicativo.
+Em plataformas digitais de grande escala, os sistemas de recomendação deixaram de ser um recurso complementar e passaram a ocupar posição central na interação com o usuário. \citeonline{GomezUribe2016Netflix} mostram, no caso da Netflix, que a recomendação está diretamente associada à organização personalizada do catálogo, ao engajamento de médio prazo e à retenção dos usuários, sendo continuamente aprimorada por meio de testes A/B e de dados históricos de interação.
 
-No ecossistema de \textit{fitness} social, reportagens analíticas recentes detalham o crescimento do GymRats, destacando o papel de desafios em grupo, leaderboards e um feed de progresso para criar senso de pertencimento e constância nos treinos \cite{BoaForma2025GymRats}. O texto descreve viralização no Brasil a partir de 2024, mecânicas simples orientadas a metas e recompensas, alinhadas à literatura de gamificação que associa reforço social a aumento de adesão. 
+No domínio de sistemas de recomendação aplicados à atividade física, \citeonline{Venka2022CARS} apresentam uma revisão sobre algoritmos de Inteligência Artificial sensíveis ao contexto em recomendadores para \textit{fitness}. Os autores mostram que fatores como preferências individuais, contexto de uso e dados comportamentais podem ampliar a pertinência das recomendações, ao mesmo tempo em que evidenciam a necessidade de soluções mais bem adaptadas a cenários reais de uso.
 
-Já \cite{He2014RecFit} mostram que incorporar contexto (perfil, preferências, horário, local, clima, restrições) supera abordagens puramente colaborativas, sobretudo em esparsidade e início de uso, trazendo mais pertinência com menos fricção. Com isso, o usuário passa a receber recomendações personalizadas, que fazem sentido para sua rotina e contribuem diretamente para os resultados que deseja atingir.
+Já \citeonline{Zhao2020PersonalizedFitness} propõem um sistema de assistência fitness que fornece recomendações personalizadas de atividades físicas, a partir de modelagem dinâmica de usuários. No estudo, os autores acompanharam 40 participantes por 60 dias e observaram diferenças estatisticamente significativas em motivação e preferência entre os grupos avaliados, indicando que a combinação entre personalização e gamificação pode contribuir positivamente para o engajamento em atividades físicas. Esse correlato mostra, de forma mais direta, como um sistema de recomendação pode atuar no domínio do fitness.
 
- No contexto de privacidade em redes de treino com localização, \cite{Hassan2018} analisam mecanismos de proteção por exemplo, zonas de privacidade e mostram que, mesmo com ocultações parciais, trajetos públicos ainda podem permitir a dedução de domicílios e rotinas quando iniciam/terminam em pontos recorrentes. Dessa forma, salvaguardas precisam combinar desenho técnico e escolhas do usuário. 
+Também em direção semelhante, \citeonline{Agans2025PARecommender} investigam o uso de tecnologia de recomendação para apoiar a adoção de atividade física entre jovens inativos com maior peso corporal. O estudo desenvolveu um sistema capaz de sugerir atividades com base em dados populacionais e avaliou o interesse dos participantes em utilizar esse tipo de recomendação. Os resultados indicaram que aproximadamente metade dos participantes demonstrou disposição para utilizar o sistema, e parte daqueles que receberam sugestões, efetivamente experimentou as atividades recomendadas. O trabalho reforça o potencial de sistemas de recomendação para apoiar a descoberta de práticas físicas mais compatíveis com perfis e preferências individuais.
 
- Em educação digital, há evidências de que rotas personalizadas baseadas em dados elevam eficiência, engajamento e retenção. Um estudo recente implementado em plataformas como o Duolingo mostra que trilhas adaptativas em tempo real melhoram resultados e mantêm usuários ativos por mais tempo \cite{Xia2024DuolingoPaths}. O artigo reforça que a recomendação, ao considerar histórico, desempenho e contexto, é componente central do engajamento contínuo.
+Em redes sociais, a recomendação também pode explorar explicitamente a estrutura relacional entre usuários. \citeonline{10457840} propõem um método de recomendação de participantes em redes sociais baseadas em eventos, considerando aspectos de relevância e equidade na ordenação. Embora o problema tratado seja distinto do presente trabalho, o estudo é pertinente por mostrar como informações de rede e de contexto social podem ser incorporadas ao processo de recomendação.
 
-Semelhante às abordagens anteriores, o sistema proposto neste projeto se articula em diversas frentes, incluindo o uso da gamificação, pretendendo explorar microgrupos, \textit{leaderboards} de curto ciclo e resets periódicos, avaliando combinações que preservem alcançabilidade e evitem desmotivação. Também no contexto das recomendações, o sistema utiliza sinais de pessoa–atividade–evento–local para sugerir companhias e eventos compatíveis com o momento atual do usuário.
+Em conjunto, esses trabalhos mostram que a literatura já reconhece a importância da personalização, do contexto e das relações sociais em sistemas de recomendação. A proposta desenvolvida neste TCC aproxima-se dessa linha ao tratar a recomendação como núcleo técnico do sistema, mas se diferencia por direcionar o problema para a ordenação de conteúdo sobre atividade física em rede social, explorando sinais de conteúdo, coocorrência, recência, popularidade e grafo social em um mesmo ambiente experimental. Além disso, o trabalho compara um modelo híbrido de referência com uma trilha de aprendizado para ranqueamento, o que amplia a análise para além de uma única estratégia de recomendação.
 
-Por fim, o FitConnect também se assemelha a essas abordagens ao orientar recomendações por proximidade que consideram a disponibilidade real dos espaços, sempre com análises agregadas e consentimento específico, nunca exibindo trajetos individuais e, no contexto de privacidade, adotando agregação espacial e temporal, visibilidade controlada por postagem e padrões conservadores por padrão.
+
+
 
 \section{Metodologia}
 
-Esta seção apresenta os materiais utilizados para o desenvolvimento do trabalho e a metodologia adotada, detalhando a arquitetura do sistema, o \textit{pipeline} de recomendação e os modelos de inteligência artificial implementados.
+Esta seção apresenta os materiais empregados no estudo e o método adotado para desenvolver, treinar e comparar os modelos de recomendação. O foco recai sobre o fluxo de dados e sobre as escolhas metodológicas associadas ao sistema de recomendação, deixando o aplicativo apenas como contexto de aplicação.
 
 
 \subsection{Materiais}
 
-O desenvolvimento do FitConnect emprega um conjunto de tecnologias e ferramentas selecionadas para atender aos requisitos de escalabilidade, privacidade e experiência do usuário. A arquitetura é distribuída em três camadas principais: \textit{frontend}, \textit{backend} e sistema de inteligência artificial.
+A base de dados utilizada foi o LDBC Social Network Benchmark (\textit{LDBC SNB}) \cite{Angles2020LDBCSNB}, empregado como fonte de posts, comentários, \textit{tags}, interações, interesses declarados e relações sociais. A partir da versão completa da base, foram extraídos apenas os registros associados ao domínio da atividade física, produzindo arquivos em formato \textit{parquet}, é um formato de armazenamento de dados colunar que é otimizado para comprimir dados de forma eficiente, permitindo leitura rápida de colunas específicas. Foram extraidos para esse formato mensagens, interações, catálogo de \textit{tags}, interesses dos usuários, grafo social e relações de coocorrência.
 
-A camada de apresentação utiliza React Native Expo \cite{reactnative2024} com TypeScript \cite{typescript2024} para o aplicativo móvel, e Vite \cite{vite2024} com React para interface web administrativa. O \textit{backend} é implementado em C\# com .NET \cite{dotnet2024} e Entity Framework Core \cite{efcore2024}, seguindo os princípios de \textit{Domain-Driven Design} \cite{penchikala2008ddd}. O banco de dados SQL Server armazena informações de usuários, atividades, postagens e interações, com \textit{schema} projetado para suportar agregação espacial via células H3 e integração com dados de dispositivos vestíveis.
-O sistema de inteligência artificial, foco central desta implementação, é desenvolvido em Python 3.10, utilizando PyTorch 2.0 \cite{paszke2019pytorch} para implementação do modelo NCF (\textit{Neural Collaborative Filtering}), scikit-learn \cite{pedregosa2011scikit} para o modelo de \textit{Popularity Baseline}, e pandas para manipulação de dados. A arquitetura foi simplificada para utilizar apenas dois modelos de IA (NCF e Popularity), complementados por regras de código para filtragem e ajuste contextual, priorizando eficiência e interpretabilidade.
+O ambiente computacional do projeto foi organizado principalmente em Python 3.11. Na etapa de extração e transformação dos dados, utilizaram-se DuckDB, pandas, NumPy, PyArrow e \textit{requests}. Para a construção do modelo híbrido de referência, empregou-se a biblioteca scikit-learn \cite{pedregosa2011scikit}, especialmente na vetorização binária das \textit{tags}. Para a trilha de aprendizado para ranqueamento, utilizou-se o \textit{LightGBMRanker}, disponibilizado na biblioteca LightGBM \cite{Ke2017LightGBM}.
 
-A agregação espacial para preservação de privacidade emprega o sistema de indexação geoespacial H3 \cite{h3geo2024} desenvolvido pela Uber, que representa localizações como células hexagonais hierárquicas, permitindo controle preciso sobre o nível de granularidade exposto. A integração com dispositivos vestíveis (\textit{smartwatches} e pulseiras inteligentes) permite a extração automática de dados fisiológicos e de desempenho, incluindo frequência cardíaca em tempo real, gasto calórico estimado, contagem de passos, duração do exercício e qualidade do sono. Estes dados alimentam o sistema de \textit{Smart Nudges}, que opera por regras de negócio baseadas em ciência do esporte, e são utilizados na geração dos dados sintéticos de treinamento.
+Como materiais intermediários do estudo, foram produzidos artefatos derivados da base inicial, entre eles 
+\begin{itemize}
+    \item \texttt{messages\_fitness.parquet}
+    \item \texttt{interactions\_fitness.parquet}
+    \item \texttt{tag\_cooccurrence.parquet}
+    \item \texttt{posts\_metadata.parquet}
+    \item \texttt{social\_scores.parquet}
+    \item \texttt{user\_tag\_profile.parquet}
+\end{itemize}
+e os conjuntos de treino, validação e teste. Esses arquivos compõem a base efetiva sobre a qual os modelos são treinados e avaliados.
 
-
-A Figura \ref{fig:fluxo_integracao} detalha o fluxo de dados entre os componentes do sistema, desde a coleta inicial no aplicativo e dispositivos vestíveis até o processamento assíncrono pelos modelos de IA e o retorno das recomendações personalizadas.
-
-\begin{figure}[htbp]
-\centering
-\caption{Fluxo de integração e processamento de dados no ecossistema FitConnect.}
-
-\includegraphics[width=1\textwidth]{figuras/FluxogramaAppFuncionamento.drawio.png}
-\label{fig:fluxo_integracao}
-\small Fonte: Elaborado pelos autores.
-\end{figure}
+Além disso, o processo experimental foi padronizado por um orquestrador em \texttt{main.py} e por um arquivo de configuração em \texttt{casos\_uso\_tcc.json}. Esses componentes permitem controlar parâmetros de treinamento, famílias de modelo, etapas de avaliação e diretórios de saída, favorecendo a reprodutibilidade dos experimentos.
 
 \subsection{Método}
-Esta subseção detalha a implementação do sistema, organizada em três partes: a arquitetura geral que integra as camadas de aplicação, o \textit{pipeline} de recomendação que combina dois modelos de IA (NCF e Popularity) com regras de código, e o sistema de \textit{Smart Nudges} que opera por regras de negócio. A distinção entre componentes de IA e código, apresentada na Tabela \ref{tab:ia_vs_codigo}, orienta toda a implementação.
 
-\subsubsection{Arquitetura Geral do Sistema}
+O método desenvolvido foi organizado em cinco etapas principais: extração e filtragem do conteúdo, preparação dos dados, separação experimental, construção dos modelos de recomendação e rastreabilidade dos experimentos.
 
-A arquitetura do sistema integra aplicativo móvel, \textit{backend} de serviços e sistema de inteligência artificial. O aplicativo móvel e interface web seguem padrão \textit{Model-View-Controller}, que é um padrão de arquitetura de projeto consolidado \cite{10.5555/186897}, enquanto o \textit{backend} implementa \textit{Domain-Driven Design} \cite{10.5555/861502} com camadas de domínio, aplicação e infraestrutura. O \textit{schema} do banco de dados armazena perfis de usuário com atributos como nível de condicionamento. Dentre esses perfis temos \textit{persona} e modalidades preferidas, atividades físicas vinculadas a sinais de \textit{wearables}, postagens com controles de visibilidade e interações que alimentam o sistema de recomendação. A agregação espacial é implementada através de células H3, permitindo que atividades e perfis referenciem localizações agregadas ao invés de coordenadas GPS precisas.
+\subsubsection{Extração e filtragem do conteúdo}
 
-A Figura \ref{fig:perfil_privacidade} ilustra o modelo de dados para perfil e privacidade, destacando como a tabela \texttt{UsuarioPerfil} armazena as características utilizadas pela IA, enquanto a tabela \texttt{CelulaLocalizacao} e o atributo \texttt{CelulaH3} garantem o desacoplamento da localização exata.
+A primeira etapa consistiu em transformar uma base social genérica em um conjunto de dados orientado ao domínio da atividade física. Para isso, o arquivo compactado do \textit{LDBC SNB} foi extraído e seus arquivos \textit{CSV} foram processados com DuckDB. Em seguida, o conteúdo associado à temática \textit{fitness} foi identificado por duas estratégias complementares: correspondência por classes de \textit{tags} e, quando necessário, filtragem direta pelos nomes das próprias \textit{tags}. Esse procedimento resultou em tabelas com mensagens, interações, interesses e relações sociais já restritas ao domínio estudado.
 
-\begin{figure}[htbp]
-\centering
-\caption{Modelo de dados para Perfil e Privacidade, evidenciando o uso de células H3 para anonimização de localização.}
-\includegraphics[width=0.7\textwidth]{figuras/diagramaFluxoPrivacidadePerfil.drawio.png}
-\label{fig:perfil_privacidade}
-\small Fonte: Elaborado pelos autores.
-\end{figure}
+\subsubsection{Preparação dos dados e separação experimental}
 
+Na segunda etapa, os arquivos extraídos foram convertidos em artefatos próprios para treinamento. Entre eles, destacam-se os metadados semânticos dos posts, a contagem de interações por \textit{tag}, os escores de influência social por post e os perfis usuário-\textit{tag}. Em seguida, os dados foram divididos em treino, validação e teste, nas proporções de 70\%, 15\% e 15\%, respectivamente.
 
-A Tabela \ref{tab:campos_perfil_uso} detalha os campos essenciais do modelo de perfil e sua utilização nos componentes do sistema.
+Uma escolha metodológica importante foi recalcular, apenas com os dados de treino, estruturas como coocorrência de \textit{tags} e escores sociais. Essa decisão foi adotada para evitar vazamento de informação entre as etapas experimentais, isto é, impedir que padrões presentes em validação ou teste influenciassem o processo de aprendizagem dos modelos.
 
-\begin{table}[htbp]
-\centering
-\caption{Campos do modelo de perfil e sua utilização no sistema}
-\label{tab:campos_perfil_uso}
-\begin{tabular}{|l|l|l|p{5cm}|}
-\hline
-\textbf{Tabela} & \textbf{Campo} & \textbf{Componente} & \textbf{Utilização} \\
-\hline
-UsuarioPerfil & Persona & NCF (IA) & Define padrão comportamental para geração de dados de treinamento \\
-\hline
-UsuarioPerfil & ModalidadesPrimarias & Filtro (Código) & Prioriza posts da modalidade preferida na recuperação \\
-\hline
-UsuarioPerfil & ModalidadesPrimarias & Impulso (Código) & Aplica +20\% na pontuação de posts compatíveis \\
-\hline
-UsuarioPerfil & NivelCondicionamento & Nudges (Regras) & Ajusta intensidade sugerida nos alertas motivacionais \\
-\hline
-UsuarioPerfil & CelulaH3Casa & Eventos (Código) & Recomenda eventos na mesma região agregada \\
-\hline
-CelulaLocalizacao & CelulaH3 & Privacidade & Substitui coordenadas GPS por célula hexagonal (~460m) \\
-\hline
-\end{tabular}
-\end{table}
+\subsubsection{Modelo híbrido de referência}
 
-O campo \texttt{CelulaH3Casa} merece destaque: em vez de armazenar a localização exata do usuário (latitude/longitude), o sistema converte as coordenadas para uma célula H3 de resolução 8, que representa uma área hexagonal de aproximadamente 460 metros de lado. Esta abordagem garante privacidade por design, permitindo funcionalidades de proximidade sem expor endereços reais.
+O primeiro modelo adotado no trabalho foi um sistema de recomendação híbrido de referência, concebido para combinar diferentes sinais de relevância em uma função de ordenação interpretável. A representação dos posts foi construída por vetorização binária das \textit{tags}, permitindo comparar a proximidade temática entre o conteúdo de entrada e o catálogo disponível.
+
+Sobre essa representação, o método combina cinco sinais principais: similaridade de conteúdo, coocorrência de \textit{tags}, recência, popularidade e influência do grafo social. Em termos gerais, o escore final do item pode ser entendido como uma combinação ponderada desses componentes, com pesos parametrizáveis conforme o experimento realizado:
+
+\[
+score(i,q) =
+w_c \cdot s_{conteudo} +
+w_o \cdot s_{coocorrencia} +
+w_r \cdot s_{recencia} +
+w_s \cdot s_{social} +
+w_p \cdot s_{popularidade}
+\]
+
+Nessa formulação, a similaridade de conteúdo aproxima itens tematicamente semelhantes; a coocorrência amplia a recomendação para conteúdos relacionados; a recência incorpora a dimensão temporal; a popularidade representa o interesse agregado da comunidade; e a influência do grafo social considera a estrutura relacional dos usuários que interagiram com o conteúdo. A escolha dessa arquitetura se justifica por três razões principais: interpretabilidade, aderência aos metadados ricos do \textit{LDBC SNB} e baixo custo computacional para treino e inferência.
+
+\subsubsection{Trilha de aprendizado para ranqueamento}
+
+Como segunda família de modelos, foi implementada uma trilha de aprendizado para ranqueamento (\textit{Learning to Rank}). Nessa etapa, foram construídos conjuntos de pares consulta-item (\textit{query-item}) a partir dos dados de treino e validação, com geração de exemplos positivos e amostragem de exemplos negativos. Também foram utilizados candidatos difíceis, isto é, itens potencialmente próximos da consulta, mas não observados como relevantes, de modo a tornar o treinamento mais informativo.
+
+Sobre esses dados, o \textit{LightGBMRanker} aprende uma função de ordenação a partir de atributos derivados dos mesmos sinais utilizados no modelo híbrido de referência. Assim, em vez de depender apenas de pesos definidos manualmente, a ordem dos conteúdos passa a ser ajustada por um processo supervisionado. No escopo deste TCC, essa trilha foi adotada como base comparativa para verificar em que medida a aprendizagem da ordenação pode superar uma combinação manual e explicável de sinais.
+
+\subsubsection{Rastreabilidade e reprodutibilidade}
+
+Para assegurar reprodutibilidade, cada execução foi associada a um identificador técnico da base (\texttt{dataset\_key}), que isola diretórios de extração, dados preparados, conjuntos experimentais, modelos e resultados. Além disso, cada experimento registra seus parâmetros e sua proveniência em arquivos de manifesto e em \texttt{metadata.json}, permitindo identificar com precisão qual base, qual configuração e quais artefatos foram utilizados em cada treinamento.
+
+Complementarmente, o arquivo \texttt{casos\_uso\_tcc.json} organiza os experimentos em famílias de modelo, parâmetros, avaliações habilitadas e métricas-alvo. Essa escolha metodológica foi importante para permitir comparação reproduzível entre o modelo híbrido de referência e a trilha com \textit{LightGBMRanker}. A aplicação prática desse protocolo experimental será detalhada na próxima seção, dedicada aos experimentos e resultados.
 
 
 
-No FitConnect, \textit{Posts} agregam mídia, metadados de atividade e sinais de \textit{wearables}, formando um grafo multirrelacional que alimenta o sistema de recomendação. Cada post é enriquecido com tags de modalidade, localização agregada (H3) e visibilidade configurável, permitindo descoberta contextualizada e preservação de privacidade.
-
-\subsubsection{Pipeline de Recomendação}
-
-O sistema de recomendação constitui o núcleo da plataforma, implementando um \textit{pipeline} em três estágios que combina dois modelos de Inteligência Artificial com regras de código. 
-
-A base de dados para este processo é estruturada conforme a Figura \ref{fig:interacoes_recomendacao}, onde a tabela \texttt{Interacao} centraliza todos os sinais (curtidas, comentários, compartilhamentos) que alimentam o treinamento do modelo NCF. Já a tabela \texttt{UsuarioConexao} define as relações de conexão  (\textit{Follow}/\textit{Friend}) utilizadas nas regras de impulso.
-
-
-\begin{figure}[htbp]
-\centering
-\caption{Modelo de dados para Interações e Recomendação, mostrando a estrutura de captura de sinais sociais.}
-\includegraphics[width=1\textwidth]{figuras/diagramaInteracoesRecomendacao.drawio.png}
-\label{fig:interacoes_recomendacao}
-\small Fonte: Elaborado pelos autores.
-\end{figure}
-
-
-A Tabela \ref{tab:campos_interacoes_uso} detalha como cada campo do modelo de interações alimenta os componentes do sistema.
-
-\begin{table}[htbp]
-\centering
-\caption{Campos do modelo de interações e sua utilização no sistema}
-\label{tab:campos_interacoes_uso}
-\begin{tabular}{|l|l|l|p{5.5cm}|}
-\hline
-\textbf{Tabela} & \textbf{Campo} & \textbf{Componente} & \textbf{Utilização} \\
-\hline
-Interacao & TipoAcao & NCF (IA) & Ações \texttt{like}, \texttt{comment} e \texttt{share} geram labels positivos (1) para treinamento \\
-\hline
-Interacao & IdAlvo & NCF (IA) & Identifica o post-alvo para formar o par (user\_id, post\_id) no treinamento \\
-\hline
-Interacao & DataHora & NCF (IA) & Ordena interações temporalmente para split 80\% treino / 20\% teste \\
-\hline
-UsuarioConexao & IdUsuario1/2 & Boost (Código) & Aplica +30\% na pontuação de posts de autores seguidos \\
-\hline
-UsuarioConexao & TipoConexao & Boost (Código) & Diferencia \texttt{follow} (+30\%) de \texttt{friend} (+50\% se amigo interagiu) \\
-\hline
-\end{tabular}
-\end{table}
-
-Este modelo de dados é o coração do treinamento da IA: cada interação positiva (like, comment, share) capturada pela tabela \texttt{Interacao} torna-se um exemplo de treinamento para o NCF, permitindo que a rede neural aprenda as preferências implícitas de cada usuário. A tabela \texttt{UsuarioConexao}, por sua vez, não alimenta a IA diretamente, ela é consumida apenas pelas regras de impulso (código), que priorizam conteúdo de conexões sociais na etapa final de re-ranking.
-
-
-O fluxo completo do \textit{pipeline} é ilustrado na Figura \ref{fig:pipeline}, evidenciando a distinção entre componentes de IA (em destaque azul) e código (cinza), conforme classificado na Tabela \ref{tab:ia_vs_codigo}.
-
-
-\begin{figure}[htbp]
-\caption{\textit{Pipeline} de recomendação simplificado do FitConnect: componentes de IA em destaque azul, código em cinza}
-\centering
-\includegraphics[width=0.8\textwidth]{figuras/PipelineRecomendacao.drawio.png}
-\label{fig:pipeline}
-\small Fonte: Elaborado pelos autores.
-\end{figure}
-
-O funcionamento do \textit{pipeline} pode agora ser reinterpretado a partir das entidades do nosso banco de dados e dos modelos de IA envolvidos. Assim, retomamos as três etapas já apresentadas anteriormente, mas desta vez destacando como o fluxo se ancora diretamente nas tabelas do sistema (Figura~\ref{fig:interacoes_recomendacao}) e como cada estágio interage com os componentes inteligentes da arquitetura. A seguir, descrevemos novamente o pipeline sob essa perspectiva integrada.
-
-\begin{enumerate}
-    \item Filtro Simples (Código): O foco desta etapa é velocidade. De todos os 50.000 posts disponíveis na tabela \texttt{Postagem}, o sistema aplica regras simples: consulta o campo \texttt{ModalidadesPrimarias} da tabela \texttt{UsuarioPerfil} para selecionar posts compatíveis, filtra por frescor (últimos 14 dias usando o campo \texttt{DataHora}) e remove conteúdo do próprio usuário. Esta etapa reduz o universo para aproximadamente 2.000 candidatos em menos de 5 milissegundos, sem necessidade de modelo neural.
-    
-    \item NCF Scoring (IA Neural): Com um número gerenciável de candidatos, o modelo \textit{Neural Collaborative Filtering} analisa cada um deles. Conforme detalhado na Tabela \ref{tab:campos_interacoes_uso}, o NCF foi treinado usando os pares (\texttt{user\_id}, \texttt{post\_id}) extraídos da tabela \texttt{Interacao}, onde ações como \texttt{like}, \texttt{comment} e \texttt{share} geram exemplos positivos. Para usuários novos sem histórico (\textit{cold start}), o sistema automaticamente utiliza o modelo de \textit{Popularity Baseline}, que recomenda posts populares com decaimento temporal.
-
-    \item Regras de impulso (Código): A lista final é ajustada por regras interpretáveis que consomem dados da tabela \texttt{UsuarioConexao}. Conforme a Tabela \ref{tab:campos_interacoes_uso}, o sistema diferencia tipos de conexão: aumento de 30\% na pontuação para posts de autores com \texttt{TipoConexao = 'follow'} (incentivando descoberta através de conexões), 20\% para posts da modalidade preferida, e 50\% quando conexões do tipo \texttt{'friend'}. Estas regras são facilmente ajustáveis sem re-treinamento do modelo.
-\end{enumerate}
-
-A Tabela \ref{tab:fluxo_dados_pipeline} sintetiza o fluxo de dados entre entidades e componentes do \textit{pipeline}:
-
-\begin{table}[htbp]
-\centering
-\caption{Fluxo de dados entre entidades do banco e componentes do \textit{pipeline}}
-\label{tab:fluxo_dados_pipeline}
-\begin{tabular}{|l|l|l|p{4.5cm}|}
-\hline
-\textbf{Estágio} & \textbf{Entidade} & \textbf{Campo} & \textbf{Como é Usado} \\
-\hline
-Filtro (Código) & UsuarioPerfil & ModalidadesPrimarias & Filtra posts por modalidade \\
-\hline
-Filtro (Código) & Postagem & DataHora & Seleciona posts $<$ 14 dias \\
-\hline
-NCF (IA) & Interacao & TipoAcao & Label positivo se like/comment/share \\
-\hline
-NCF (IA) & Interacao & IdAlvo & Par (user\_id, post\_id) para treino \\
-\hline
-Boost (Código) & UsuarioConexao & TipoConexao & +30\% follow, +50\% friend \\
-\hline
-Popularity (IA) & Postagem & LikeCount & Ranking de popularidade \\
-\hline
-\end{tabular}
-\end{table}
-
-\subsubsection{Sistema de Smart Nudges (Regras de Negócio)}
-\label{sec:smart_nudges}
-
-Complementando o \textit{pipeline} de recomendação de conteúdo, o FitConnect implementa um sistema separado de \textit{Nudges} Inteligentes \cite{thaler2019nudge}. É importante destacar que este sistema não utiliza Inteligência Artificial, ele opera exclusivamente por regras de negócio baseadas em diretrizes médicas de reabilitação e esporte \cite{2006} e psicologia comportamental. Esta escolha de design garante interpretabilidade total, controle sobre recomendações de saúde e facilidade de ajuste.
-
-A Figura \ref{fig:wearables_nudges} detalha como os dados são coletados e processados: as tabelas referenciadas de  \texttt{UsuarioDadosDiarios} (sono, passos) e \texttt{AtividadeSinaisWearable} (intensidade do treino) servem de gatilho para a geração de registros na tabela \texttt{SmartNudge}.
-
-\begin{figure}[htbp]
-\centering
-\caption{Modelo de dados para Wearables e Smart Nudges, ilustrando o fluxo de dados fisiológicos para geração de notificações motivacionais.}
-\includegraphics[width=1\textwidth]{figuras/diagramaWerables.drawio.png}
-\label{fig:wearables_nudges}
-\small Fonte: Elaborado pelos autores.
-\end{figure}
-
-
-A Tabela \ref{tab:campos_nudges} detalha como cada campo do modelo de dados alimenta as regras de disparo dos \textit{nudges}.
-
-\begin{table}[H]
-\centering
-\caption{Campos do modelo de wearables e sua utilização nas regras de nudges}
-\label{tab:campos_nudges}
-\begin{tabular}{|l|l|l|p{5cm}|}
-\hline
-\textbf{Tabela} & \textbf{Campo} & \textbf{Nudge} & \textbf{Regra de Disparo} \\
-\hline
-UsuarioDadosDiarios & QualidadeSono & Recovery & Se sono $<$ ``bom'', sugere descanso \\
-\hline
-UsuarioDadosDiarios & PassosTotais & Streak & Se passos $<$ 70\% da média 7 dias \\
-\hline
-UsuarioDadosDiarios & FCRepouso & Recovery & Detecta fadiga acumulada \\
-\hline
-AtividadeSinaisWearable & FC\_Media & Challenge & Se 3+ dias com intensidade baixa \\
-\hline
-AtividadeSinaisWearable & ZonaDominante & Variety & Se 80\%+ na mesma zona/modalidade \\
-\hline
-SmartNudge & Urgencia & Priorização & Ordena notificações (1=baixa, 4=alta) \\
-\hline
-SmartNudge & Visualizado & Feedback & Rastreia efetividade das notificações \\
-\hline
-\end{tabular}
-\end{table}
-
-É fundamental destacar a diferença entre o \textit{pipeline} de recomendação e os \textit{Smart Nudges}: enquanto o primeiro utiliza IA neural (NCF) para aprender preferências implícitas a partir de interações históricas, os \textit{nudges} operam por regras explícitas baseadas em limiares fisiológicos. Esta distinção garante que recomendações de saúde, como sugerir descanso, sejam sempre interpretáveis e auditáveis, focando em transparência e bem estar do usuário.
-
-A Tabela \ref{tab:nudges_regras} apresenta os cinco tipos de \textit{nudges} implementados, suas condições de disparo e os fundamentos científicos de cada um.
-
-\begin{table}[H]
-\centering
-\caption{Regras de disparo dos Smart Nudges e dados utilizados}
-\label{tab:nudges_regras}
-\begin{tabular}{|l|p{4.5cm}|p{4cm}|l|}
-\hline
-\textbf{Nudge} & \textbf{Condição (Regra)} & \textbf{Dados Utilizados} & \textbf{Fundamento} \\
-\hline
-Recuperação & Sono ruim + FC $>$ 140 BPM ou 3+ dias intensos & sleep\_prev, hr\_mean, intensity & Supercompensação \\
-\hline
-Desafio & 3+ dias baixa intensidade + sono bom & intensity, sleep\_prev & Zona de conforto \\
-\hline
-Constância & Passos $<$ 70\% da média & steps, média 7 dias & Aversão à perda \\
-\hline
-Variedade & 80\%+ mesma modalidade & modality (últimos 10 dias) & Periodização \\
-\hline
-Momento Ideal & Horário de pico + sono bom & created\_at, sleep\_prev & Timing comportamental \\
-\hline
-\end{tabular}
-\end{table}
-
-O sistema monitora dados de dispositivos vestíveis para identificar cinco cenários principais:
-\begin{itemize}
-    \item [a)] Recuperação: Sugere descanso ou atividades leves quando detecta sono inadequado ou excesso de treino, baseando-se no princípio da supercompensação.
-    \item [b)] Desafio: Encoraja o aumento de intensidade quando identifica períodos de estagnação, visando evitar platôs de evolução.
-    \item [c)] Constância: Alerta sobre o risco de quebrar sequências de atividades, utilizando o gatilho comportamental de aversão à perda.
-    \item [d)] Variedade: Sugere novas modalidades quando nota repetição excessiva, prevenindo lesões por esforço repetitivo.
-    \item [e)] Momento Ideal: Identifica e aproveita os horários em que o usuário historicamente apresenta melhor desempenho.
-\end{itemize}
 
 \section{Experimentos e Resultados Preliminares}
 
-\subsection{Geração de Dados Sintéticos}
+Esta seção apresenta os resultados preliminares já obtidos com a versão SF0.1 da base \textit{LDBC SNB} e mantém, ao final, o espaço destinado às próximas versões do experimento. A rodada inicial do \textit{benchmark} já foi concluída para os cinco modelos configurados, mas a análise ainda é considerada preliminar porque as versões maiores da base, como SF1, permanecem pendentes de execução.
 
-Para validação inicial do sistema de recomendação, foram gerados dados sintéticos que simulam o comportamento real de uma rede social ativa. O processo de geração foi implementado em Python e segue uma metodologia baseada em templates pré-definidos com randomização controlada.
+\subsection{Configuração experimental}
 
-\subsubsection{Metodologia de Geração}
+Os experimentos foram organizados com separação dos dados em treino, validação e teste, nas proporções de 70\%, 15\% e 15\%, respectivamente. Essa divisão foi adotada porque cada subconjunto cumpre uma função distinta no processo experimental: o conjunto de treino é utilizado para ajustar os modelos, o conjunto de validação é empregado para calibrar pesos e hiperparâmetros, e o conjunto de teste permanece reservado para a medição final do desempenho. A semente 42 corresponde ao valor fixo usado para gerar essa divisão de forma reproduzível, isto é, permitindo repetir a mesma separação em execuções futuras.
 
-A geração de dados sintéticos utiliza dois conjuntos de templates:
-
-\begin{enumerate}
-    \item 8 Personas de Usuários: perfis comportamentais pré-definidos que determinam modalidades preferidas, horários típicos de treino, frequência semanal e propensão social. Cada usuário é associado a uma persona, e seus atributos são randomizados dentro dos limites definidos pelo template.
-    
-    \item 8 Perfis de Modalidade: especificações fisiológicas por tipo de atividade física, incluindo faixas realistas de frequência cardíaca, contagem de passos e distribuição de intensidade. Posts são gerados com sinais de \textit{wearables} randomizados dentro dessas faixas.
-\end{enumerate}
-
-Esses dois templates podem ser vistos na tabela \ref{tab:personas}.
-
-
-\begin{figure}[H]
-\centering
-\caption{Fluxo de geração de dados sintéticos: templates pré-definidos são combinados com randomização controlada para gerar dados de treinamento}
-\label{fig:fluxo_geracao}
-\includegraphics[width=0.95\textwidth]{figuras/diagramaFluxoDadosSintetico.drawio.png}
-\small Fonte: Elaborado pelos autores.
-\end{figure}
-
-Esta abordagem garante que os dados contenham padrões aprendíveis pelo modelo NCF. Os usuários de uma mesma persona tendem a interagir com posts de modalidades similares, criando correlações que a rede neural pode identificar e generalizar.
-
-
-\subsubsection{Sistema de Personas}
-
-O elemento central da geração é o sistema de \textit{personas}, que define perfis comportamentais consistentes para os usuários. Em vez de gerar dados totalmente aleatórios, que não conteriam padrões, cada usuário é associado a uma \textit{persona} que determina suas preferências de modalidade, horários de treino, frequência semanal e propensão a interagir socialmente. Este design é fundamentado em estudos populacionais sobre padrões de atividade física, como o fenômeno dos praticantes de fim de semana \cite{santos2022weekend} e variações de desempenho por cronotipo \cite{facer2018chronotype}.
-
-A Tabela \ref{tab:personas} apresenta as oito \textit{personas} implementadas e suas características:
+O \textit{benchmark} compara duas variantes do modelo híbrido de referência e três variantes da trilha com \textit{LightGBMRanker}. A primeira rodada experimental foi conduzida com a versão SF0.1 do \textit{LDBC SNB}, escolhida por seu menor custo computacional e por permitir validar o fluxo completo de extração, treinamento e avaliação. Após essa etapa, o mesmo protocolo será reaplicado a versões maiores, como SF1, preservando a comparabilidade entre as execuções.
 
 \begin{table}[htbp]
 \centering
-\caption{Personas de usuários e suas características comportamentais}
-\label{tab:personas}
-\begin{tabular}{|l|l|l|l|r|}
+\caption{Configurações do \textit{benchmark} do TCC}
+\label{tab:configuracoes_benchmark_tcc}
+\small
+\begin{tabular}{|p{3.2cm}|p{2.2cm}|p{7.0cm}|}
 \hline
-\textbf{Persona} & \textbf{Modalidades} & \textbf{Horários} & \textbf{Nível}  \\
+\textbf{Experimento} & \textbf{Família} & \textbf{Caracterização} \\
 \hline
-Corredor Matinal & Corrida, Caminhada & 6-7h & Intermediário \\
-Musculador Noturno & Musculação, HIIT & 18-20h & Avançado \\
-Yogi Relaxado & Yoga, Caminhada & 7-8h, 19h & Intermediário \\
-Crossfitter Intenso & Crossfit, Corrida & 6h, 18h & Avançado\\
-Ciclista Weekend & Bike, Corrida & 7-8h, 17h & Intermediário \\
-Nadador Regular & Natação, Corrida & 6h, 12h, 18h & Intermediário  \\
-Iniciante Explorando & Caminhada, Yoga, Bike & 8-9h, 19h & Iniciante \\
-Atleta Veterano & Corrida, Musculação, Natação & 6-7h, 17h & Avançado \\
+\textit{Baseline} padrão & Híbrida & Combinação manual de similaridade de conteúdo, coocorrência de \textit{tags}, recência, popularidade e influência do grafo social. \\
 \hline
-\end{tabular}
-\end{table}
-
-\subsubsection{Regras de Afinidade nas Interações}
-
-O aspecto mais importante para o treinamento do modelo NCF é a regra de afinidade nas interações. 80\% das interações (curtidas, comentários) são geradas entre usuários e posts da mesma modalidade. Por exemplo, um usuário com \textit{persona} ``Corredor Matinal'' tem 80\% de probabilidade de interagir com posts de corrida ou caminhada. Os 20\% restantes são interações aleatórias, simulando descoberta de novos interesses.
-
-O modelo NCF consegue identificar que usuários que curtem posts de corrida tendem a curtir outros posts de corrida, e generaliza este padrão para fazer recomendações.
-
-\subsubsection{Sinais de Wearables Realistas}
-
-Cada post gerado contém sinais de \textit{wearables} calibrados por modalidade, conforme a Tabela \ref{tab:wearables_modalidade}:
-
-\begin{table}[htbp]
-\centering
-\caption{Parâmetros de \textit{wearables} por modalidade (faixas realistas)}
-\label{tab:wearables_modalidade}
-\begin{tabular}{|l|c|c|l|}
+\textit{Baseline} otimizado & Híbrida & Mesmo conjunto de sinais, com ajuste fino de pesos no conjunto de validação. \\
 \hline
-\textbf{Modalidade} & \textbf{FC Média (BPM)} & \textbf{Passos} & \textbf{Intensidade Predominante} \\
+LTR \textit{core} & LTR & \textit{LightGBMRanker} com os cinco sinais principais do modelo híbrido como atributos de entrada. \\
 \hline
-Corrida & 140-165 & 8.000-15.000 & Moderada (50\%) \\
-Musculação & 110-140 & 2.000-5.000 & Alta (50\%) \\
-HIIT & 160-185 & 3.000-8.000 & Alta (70\%) \\
-Yoga & 85-110 & 500-2.000 & Baixa (70\%) \\
-Natação & 120-150 & 0-500 & Moderada (60\%) \\
-Crossfit & 155-180 & 4.000-10.000 & Alta (65\%) \\
+LTR contextual & LTR & \textit{LightGBMRanker} com sinais principais e atributos contextuais do item, como sobreposição de \textit{tags}, idioma e tipo de mensagem. \\
+\hline
+LTR robusto & LTR & Variante com mais consultas de treino, mais negativos difíceis e regularização ampliada. \\
 \hline
 \end{tabular}
 \end{table}
 
-Estes sinais são utilizados pelo sistema de \textit{Smart Nudges} para gerar notificações motivacionais contextualizadas.
-
-\subsubsection{Estrutura dos Dados Gerados}
-
-A Tabela \ref{tab:dataset} apresenta as estatísticas gerais do \textit{dataset} sintético. O conjunto totaliza 10.000 usuários distribuídos em 8 \textit{personas}, 50.000 posts com sinais de \textit{wearables} calibrados por modalidade, e 100.000 interações com regra de 80\% de afinidade.
-
-\begin{table}[H]
-\centering
-\caption{Estatísticas do dataset sintético gerado}
-\label{tab:dataset}
-\begin{tabular}{lrp{6cm}}
-\hline
-\textbf{Componente} & \textbf{Quantidade} & \textbf{Características} \\
-\hline
-Usuários & 10.000 & Distribuídos em 8 personas com preferências consistentes \\
-\textit{Posts} & 50.000 & Sinais de \textit{wearables} calibrados por modalidade \\
-Eventos & 5.000 & Treinos em grupo organizados por comunidade \\
-Interações & 100.000 & 80\% com afinidade de modalidade (padrão aprendível) \\
-\hline
-\end{tabular}
-\end{table}
-
-\subsubsection{Associação entre Dados e Modelos}
-
-A Tabela \ref{tab:dados_modelos} explicita quais dados são utilizados por cada componente do sistema, distinguindo claramente o que alimenta a IA (NCF) e o que alimenta as regras de código (Filtro, Impulsos, Nudges). Note que o \textit{pipeline} de recomendação e o sistema de Smart Nudges operam sobre conjuntos de dados distintos, conforme discutido na Seção \ref{sec:smart_nudges}.
-
-\begin{table}[htbp]
-\centering
-\caption{Associação entre dados gerados e componentes do sistema}
-\label{tab:dados_modelos}
-\begin{tabular}{|l|l|c|c|c|c|}
-\hline
-\textbf{Fonte} & \textbf{Dado} & \textbf{NCF (IA)} & \textbf{Filtro} & \textbf{Impulso} & \textbf{Nudges} \\
-\hline
-Interação & user\_id + post\_id & $\checkmark$ & -- & -- & -- \\
-Interação & action (like/comment) & $\checkmark$ & -- & -- & -- \\
-Interação & timestamp & $\checkmark$ & -- & -- & -- \\
-\hline
-Post & modality & -- & $\checkmark$ & $\checkmark$ & -- \\
-Post & created\_at & -- & $\checkmark$ & -- & -- \\
-Post & author\_id & -- & -- & $\checkmark$ & -- \\
-\hline
-Conexão & follows/friends & -- & -- & $\checkmark$ & -- \\
-\hline
-Wearable & hr\_mean (FC média) & -- & -- & -- & $\checkmark$ \\
-Wearable & steps (passos) & -- & -- & -- & $\checkmark$ \\
-Wearable & intensity & -- & -- & -- & $\checkmark$ \\
-Wearable & sleep\_prev (sono) & -- & -- & -- & $\checkmark$ \\
-\hline
-\end{tabular}
-\end{table}
-
-Observa-se que o modelo NCF utiliza exclusivamente dados de interações, enquanto os Smart Nudges utilizam exclusivamente dados de \textit{wearables}. Esta separação reforça a distinção arquitetural, o NCF aprende preferências de conteúdo, enquanto os Nudges avaliam estado físico e comportamental do usuário.
-
-\subsection{Processo de Treinamento}
-Os modelos foram treinados utilizando divisão temporal: 80\% das interações mais antigas são usadas para aprendizado, e 20\% das mais recentes são reservadas para teste.
-
-\subsubsection{Previsão de Interações Futuras}
-
-O objetivo do modelo NCF não é prever literalmente o futuro, mas sim estimar a probabilidade de um usuário gostar de um post que ainda não viu. Durante o treinamento, o modelo aprende padrões de preferência a partir do histórico de interações passadas. Durante o uso real, ele aplica esses padrões para ordenar posts novos por relevância.
-
-A previsão funciona assim:
-\begin{enumerate}
-    \item Aprendizado (passado): O modelo observa que o usuário X curtiu posts de corrida e não curtiu posts de yoga.
-    \item Generalização: O modelo aprende que usuários com perfil similar a X tendem a preferir posts de corrida.
-    \item Recomendação (presente): Quando um novo post de corrida é publicado, o modelo atribui alta probabilidade de X gostar dele, mesmo sem X ter visto esse post antes.
-\end{enumerate}
-
-A divisão temporal avalia a capacidade do modelo de aprender padrões consistentes no comportamento do usuário. Por exemplo: suponha que, entre janeiro e março, um usuário tenha demonstrado preferência por treinos de força. Em abril, ao curtir um novo post desse tipo, o modelo não antecipou o futuro, mas utilizou exclusivamente dados do período anterior para identificar que aquele conteúdo é compatível com o perfil aprendido.
-
-
-\subsubsection{Interpretação da Redução de Loss}
-
-Em modelos de IA, o loss (ou erro) é uma medida numérica que indica o quanto as previsões do modelo estão se afastando da realidade. Quanto maior o loss, pior o modelo está acertando, quanto menor, mais próximo ele está do comportamento verdadeiro dos usuários. Assim, o treinamento nada mais é do que um processo iterativo em que a rede neural ajusta seus parâmetros para reduzir esse erro.
-
-Com essa definição em mente, o valor inicial de \textit{loss} = 0,6932 não é arbitrário: ele corresponde exatamente ao erro produzido por um modelo que atribui 69\% de probabilidade para todas as previsões. Esse é o ponto de partida típico de uma rede neural não treinada.
-
-
-\begin{table}[H]
-\centering
-\caption{Resultados de treinamento dos modelos de IA}
-\label{tab:training_results}
-\begin{tabular}{lccccc}
-\hline
-\textbf{Modelo} & \textbf{Tipo} & \textbf{Épocas} & \textbf{Loss Inicial} & \textbf{Loss Final} & \textbf{Redução} \\
-\hline
-NCF & IA Neural & 5 & 0,6932 & 0,0236 & 96,6\% \\
-Popularity & Baseline & -- & -- & -- & -- \\
-\hline
-\end{tabular}
-\end{table}
-
-
-O campo épocas representa quantas vezes o modelo neural percorreu todo o conjunto de dados durante o processo de aprendizado. Cada época corresponde a um periodo de treinamento que melhora o seu entendimento dos dados. No caso do NCF, o treinamento foi executado por 5 épocas, refinando progressivamente suas previsões até atingir o \textit{loss} final de 0,0236 (2\%).
-
-Já o modelo Popularity, embora também seja considerado uma forma de IA, não realiza treinamento durante o nosso pipeline. Ele atua como um modelo baseline pré-treinado, baseado em estatísticas agregadas do sistema. Como não passa por otimização iterativa nem ajuste de pesos, não há valores de loss ou épocas associados a ele. Sua função é servir como referência e atender o caso de cold start, quando o usuário ainda não possui interações suficientes para o modelo neural aprender padrões personalizados.
+A sigla LTR, utilizada na Tabela \ref{tab:configuracoes_benchmark_tcc}, refere-se ao aprendizado para ranqueamento (\textit{Learning to Rank}), isto é, à família de modelos que aprende a ordenar os itens diretamente a partir dos dados. Os parâmetros centrais de cada configuração podem ser resumidos da seguinte forma:
 
 \begin{itemize}
-    \item Antes do treinamento: O modelo diria ``50\% de chance do usuário curtir este post'' para qualquer post.
-    \item Após o treinamento: O modelo consegue distinguir ``98\% de chance de curtir este post de corrida'' vs ``2\% de chance de curtir este post de yoga'' para um usuário ``Corredor Matinal''.
+    \item \textit{Baseline} padrão: utiliza pesos manuais para os sinais principais do modelo híbrido, isto é, \texttt{w\_cos} para similaridade de conteúdo, \texttt{w\_cooc} para coocorrência de \textit{tags}, \texttt{w\_time} para recência e \texttt{w\_social} para influência social, além de \texttt{peso\_popularidade} para controlar a contribuição da popularidade no escore final.
+    \item \textit{Baseline} otimizado: mantém os mesmos sinais do caso padrão, mas ativa a busca de pesos no conjunto de validação. Nessa configuração, \texttt{grid\_step} define o passo da busca em grade, \texttt{random\_search} indica quantas combinações aleatórias adicionais são testadas, \texttt{otimizacao\_top\_k} define a profundidade da lista considerada na otimização e \texttt{max\_queries\_otimizacao} limita a quantidade de consultas usadas nesse ajuste.
+    \item LTR \textit{core}: usa apenas os cinco sinais centrais do modelo híbrido como atributos de entrada. Os parâmetros \texttt{negatives\_per\_query} e \texttt{hard\_negative\_topn} controlam o volume de exemplos negativos por consulta, enquanto \texttt{max\_queries\_train} e \texttt{max\_queries\_val} limitam o número de consultas usadas no treino e na validação. No \textit{LightGBMRanker}, \texttt{num\_leaves}, \texttt{learning\_rate} e \texttt{n\_estimators} controlam, respectivamente, a complexidade das árvores, a velocidade de aprendizagem e a quantidade de iterações do modelo.
+    \item LTR contextual: mantém os sinais centrais e acrescenta atributos contextuais do item, como sobreposição de \textit{tags}, número de \textit{tags}, comprimento do conteúdo, tipo de mensagem e idioma. Em relação ao caso \textit{core}, também amplia o número de consultas e de negativos considerados no treinamento.
+    \item LTR robusto: preserva o conjunto contextual de atributos, mas aumenta ainda mais o número de consultas e de negativos difíceis, além de tornar o treinamento mais conservador por meio de parâmetros como \texttt{min\_data\_in\_leaf}, \texttt{feature\_fraction} e \texttt{bagging\_fraction}, usados para controlar regularização e reduzir risco de sobreajuste.
 \end{itemize}
-
-A redução de 96,6\% é relevante porque demonstra que o modelo aprendeu os padrões de afinidade inseridos nos dados sintéticos. Se o modelo não tivesse aprendido nada, o \textit{loss} permaneceria próximo de 0,69.
-
-
-\subsection{Análise dos Resultados}
-
-Os resultados de treinamento demonstram que a arquitetura simplificada é eficaz para o problema de recomendação proposto.
-
-O modelo NCF (\textit{Neural Collaborative Filtering}) apresentou convergência rápida, indicando que os padrões de preferência foram efetivamente capturados.
-
-\subsubsection{Validação dos Smart Nudges}
-
-Os testes do sistema de \textit{Smart Nudges} confirmaram a capacidade das regras de negócio de identificar corretamente os cenários de saúde. Por exemplo, ao simular um usuário com sono classificado como ruim e treino intenso no dia anterior, o sistema gerou corretamente um alerta de ``Recuperação'', sugerindo atividades leves em vez de mais treino intenso.
 
 \begin{table}[htbp]
 \centering
-\caption{Validação dos Smart Nudges: cenários de teste}
-\label{tab:nudges_validacao}
-\begin{tabular}{|l|l|l|}
+\caption{Rodadas de execução experimental do estudo}
+\label{tab:rodadas_execucao_tcc}
+\small
+\begin{tabular}{|p{3.2cm}|p{3.8cm}|p{5.4cm}|}
 \hline
-\textbf{Cenário} & \textbf{Dados de Entrada} & \textbf{Nudge Gerado} \\
+\textbf{Rodada} & \textbf{Versão} & \textbf{Objetivo} \\
 \hline
-Overtraining & sleep=poor, hr=170, 3 dias intensos & Recuperação (correto) \\
-Estagnação & 5 dias intensity=low, sleep=good & Desafio (correto) \\
-Monotonia & 8 posts de corrida seguidos & Variedade (correto) \\
-Horário ideal & 7h da manhã, sono=excellent & Momento Ideal (correto) \\
+Inicial & \texttt{SF0.1} & Fluxo completo validado e primeira leitura comparativa concluída. \\
+\hline
+Intermediária & \textcolor{red}{definir próxima versão, como \texttt{SF1}} & Verificar o comportamento das métricas com maior volume de dados. \\
+\hline
+Final & \textcolor{red}{definir versão final} & Consolidar os resultados a serem apresentados na versão final do TCC. \\
 \hline
 \end{tabular}
 \end{table}
 
-Esses resultados validam que a arquitetura híbrida, IA para recomendação de conteúdo mais regras para recomendação de saúde, é funcional e atende aos objetivos do projeto.
+\subsection{Protocolo e métricas de avaliação}
+
+A expressão modo \textit{offline} designa uma avaliação realizada fora do ambiente real de uso do sistema. Em vez de medir o comportamento de usuários em produção, o modelo é testado sobre dados previamente reservados, o que permite comparar diferentes configurações sob as mesmas condições experimentais.
+
+Nesta avaliação, utiliza-se o conjunto de teste. Para cada usuário, as interações são ordenadas temporalmente; cada interação observada é tratada como item de referência, e o conjunto de interações futuras do mesmo usuário constitui a resposta relevante para comparação. A partir das \textit{tags} e do instante temporal do item de referência, o recomendador gera uma lista ordenada de candidatos, que então é confrontada com os itens realmente acessados em seguida.
+
+Para mensurar a qualidade do ranqueamento, foram adotadas métricas que consideram tanto a presença de itens relevantes quanto sua posição na lista recomendada. Nesta seção:
+
+\begin{itemize}
+    \item \textit{Precision@K} mede a proporção de itens relevantes entre os K primeiros recomendados.
+    \item \textit{Recall@K} mede a proporção dos itens relevantes que foi recuperada entre os K primeiros resultados.
+    \item \textit{HitRate@K} verifica se ao menos um item relevante aparece entre os K primeiros recomendados.
+    \item \textit{MAP@K}, ou precisão média em K, resume a precisão acumulada nas posições em que ocorrem acertos.
+    \item \textit{NDCG@K}, ou ganho acumulado descontado normalizado, valoriza mais os itens relevantes que aparecem nas primeiras posições da lista.
+    \item \textit{MRR@K}, ou posto recíproco médio, enfatiza a posição em que surge o primeiro item relevante.
+\end{itemize}
+
+Em complemento, a avaliação inclui métricas de interesse prático para o sistema. A cobertura de catálogo indica quanto do catálogo total aparece nas recomendações; a diversidade intra-lista por \textit{tags} mede a variedade temática dentro de cada lista; a novidade baseada em popularidade inversa verifica se o sistema também recomenda itens menos óbvios; a recência média recomendada mede a distância temporal média dos conteúdos sugeridos; e a latência de inferência registra o tempo necessário para produzir a recomendação. No \textit{benchmark} configurado para o TCC, a métrica-alvo principal para seleção do melhor modelo é o NDCG@10, porque ela combina relevância e posição dos itens na lista.
+
+
+\subsection{Resultados da versão inicial}
+
+Os resultados da primeira rodada, executada na versão \texttt{SF0.1}, estão sintetizados nas tabelas a seguir. A organização adota o mesmo conjunto de indicadores previsto para as próximas versões, de modo a manter a comparabilidade entre as execuções.
+
+\begin{table}[htbp]
+\centering
+\caption{Resultados de ranqueamento da rodada inicial na versão \texttt{SF0.1}}
+\label{tab:resultados_sf01_ranking}
+\small
+\begin{tabular}{|l|r|r|r|r|r|}
+\hline
+\textbf{Modelo} & \textbf{Consultas válidas} & \textbf{NDCG@10} & \textbf{MRR@10} & \textbf{Recall@10} & \textbf{Latência p95 (ms)} \\
+\hline
+\textit{Baseline} padrão & 5 & 0,0000 & 0,0000 & 0,0000 & 3,8788 \\
+\hline
+\textit{Baseline} otimizado & 5 & 0,0000 & 0,0000 & 0,0000 & 3,8436 \\
+\hline
+LTR \textit{core} & 5 & 0,0000 & 0,0000 & 0,0000 & 7,1039 \\
+\hline
+LTR contextual & 5 & 0,0000 & 0,0000 & 0,0000 & 7,3241 \\
+\hline
+LTR robusto & 5 & 0,0000 & 0,0000 & 0,0000 & 8,5048 \\
+\hline
+\end{tabular}
+\end{table}
+
+\begin{table}[htbp]
+\centering
+\caption{Indicadores complementares da rodada inicial na versão \texttt{SF0.1}}
+\label{tab:resultados_sf01_complementares}
+\small
+\begin{tabular}{|l|r|r|r|r|r|}
+\hline
+\textbf{Modelo} & \textbf{Cobertura} & \textbf{Diversidade} & \textbf{Novidade} & \textbf{Recência média (dias)} & \textbf{Avaliação manual} \\
+\hline
+\textit{Baseline} padrão & 0,9737 & 0,8526 & 0,9643 & 179,92 & N/D \\
+\hline
+\textit{Baseline} otimizado & 0,9211 & 0,8832 & 0,9343 & 141,38 & N/D \\
+\hline
+LTR \textit{core} & 0,9211 & 0,8842 & 0,9436 & 206,70 & N/D \\
+\hline
+LTR contextual & 0,9211 & 0,8842 & 0,9436 & 206,70 & N/D \\
+\hline
+LTR robusto & 0,9211 & 0,8842 & 0,9436 & 206,70 & N/D \\
+\hline
+\end{tabular}
+\end{table}
+
+Para interpretar as Tabelas \ref{tab:resultados_sf01_ranking} e \ref{tab:resultados_sf01_complementares}, convém explicitar o significado dos valores apresentados. Nas métricas de ranqueamento, o valor 0,0000 indica que, nas 5 consultas válidas do conjunto de teste, nenhum item efetivamente acessado pelo usuário após o item de referência apareceu entre os 10 primeiros recomendados. Em outras palavras, os experimentos foram executados normalmente, mas, nesta rodada inicial, não houve acertos no topo da lista capazes de elevar NDCG@10, MRR@10 e Recall@10 acima de zero. A latência p95, por sua vez, corresponde ao percentil 95 do tempo de inferência, em milissegundos, necessário para gerar a recomendação; portanto, valores menores indicam respostas mais rápidas na maior parte das consultas.
+
+Nos indicadores complementares, a cobertura expressa a fração do catálogo total que apareceu ao menos uma vez nas recomendações ao longo da avaliação. Assim, cobertura 0,9737 significa que aproximadamente 97,37\% do catálogo foi exposto pelo modelo em algum momento, enquanto 0,9211 corresponde a cerca de 92,11\%. A diversidade, medida numa escala de 0 a 1, representa o grau médio de diferença entre os conjuntos de \textit{tags} dos itens dentro de uma mesma lista; quanto mais próximo de 1, maior a variedade temática interna. A novidade também é expressa em escala crescente e é calculada por popularidade inversa, de modo que valores mais altos indicam recomendação de itens menos frequentes e, portanto, menos óbvios.
+
+A recência média recomendada, diferentemente, não é uma taxa entre 0 e 1. Ela é calculada como a distância temporal média, em dias, entre a data de criação do item recomendado e o instante do item de referência usado na consulta em modo \textit{offline}. Desse modo, valores como 141,38, 179,92 ou 206,70 dias indicam que, em média, os conteúdos sugeridos estavam separados do item de referência por vários meses, o que sinaliza baixa proximidade temporal nesta rodada inicial.
+
+\noindent\textit{Nota:} A avaliação manual da rodada SF0.1 foi considerada inconclusiva e, por isso, aparece como N/D na Tabela \ref{tab:resultados_sf01_complementares}. O executor dessa etapa registrou erro técnico de execução (\texttt{'Series' object has no attribute 'view'}) nos casos qualitativos, o que impede interpretar os valores de aprovação manual como resultado comparável entre modelos.
+
+À luz dessas definições, o modelo \textit{Baseline} padrão foi destacado formalmente como melhor configuração da rodada SF0.1. Ainda assim, esse resultado não deve ser lido como superioridade inequívoca, porque houve empate completo entre os cinco modelos nas métricas centrais de ranqueamento: NDCG@10, MRR@10 e Recall@10 permaneceram em 0,0000 para todas as configurações avaliadas. Com apenas 5 consultas válidas no conjunto de teste, a rodada inicial funciona mais como validação do protocolo experimental do que como evidência conclusiva de desempenho comparado.
+
+Quando se observam os indicadores complementares, o \textit{Baseline} padrão se destaca pela maior cobertura e pela maior novidade, o que sugere maior espalhamento do catálogo e menor concentração em itens muito frequentes. O \textit{Baseline} otimizado apresentou a menor latência p95 e a menor recência média, indicando respostas um pouco mais rápidas e recomendações temporalmente mais próximas do item de referência. As três variantes LTR exibiram diversidade ligeiramente superior, mas sem converter essa diferença em ganho nas métricas principais de ranqueamento.
+
+As avaliações auxiliares também ajudam a qualificar a leitura da rodada. Nos dois modelos híbridos, o experimento específico de popularidade, executado no conjunto de validação, mostrou redução leve do NDCG@10 quando o peso de popularidade 0,1 foi aplicado: o \textit{Baseline} padrão passou de 0,1128 para 0,1071, e o \textit{Baseline} otimizado passou de 0,1981 para 0,1950. Esse resultado sugere que, nesta versão SF0.1, a popularidade não contribuiu para melhora da ordenação. Além disso, nas três variantes LTR, a melhor iteração registrada foi a primeira, o que sugere que o volume de dados da rodada inicial ainda foi insuficiente para produzir diferenciação robusta entre as configurações de aprendizado para ranqueamento.
+
+\subsection{Espaço para comparação entre versões}
+
+A ampliação progressiva da base, passando da versão SF0.1 para versões maiores, permitirá observar se o comportamento das métricas se mantém, melhora ou se deteriora à medida que o volume de dados aumenta. A Tabela \ref{tab:comparacao_snapshots_tcc} foi preparada para registrar esse acompanhamento entre rodadas.
+
+\begin{table}[htbp]
+\centering
+\caption{Comparação prevista entre rodadas com diferentes versões}
+\label{tab:comparacao_snapshots_tcc}
+\small
+\begin{tabular}{|l|l|r|r|r|p{4.0cm}|}
+\hline
+\textbf{Rodada} & \textbf{Versão} & \textbf{Modelo destacado} & \textbf{NDCG@10} & \textbf{Cobertura} & \textbf{Observação} \\
+\hline
+Inicial & \texttt{SF0.1} & \textit{Baseline} padrão & 0,0000 & 0,9737 & Empate em NDCG@10 entre todos os modelos; amostra de 5 consultas válidas. \\
+\hline
+Intermediária & \textcolor{red}{definir, como \texttt{SF1}} & \textcolor{red}{a preencher} & \textcolor{red}{a preencher} & \textcolor{red}{a preencher} & \textcolor{red}{a preencher} \\
+\hline
+Final & \textcolor{red}{definir} & \textcolor{red}{a preencher} & \textcolor{red}{a preencher} & \textcolor{red}{a preencher} & \textcolor{red}{a preencher} \\
+\hline
+\end{tabular}
+\end{table}
+
+\textcolor{red}{Inserir aqui a discussão sobre o comportamento das métricas quando a versão da base aumentar, destacando ganhos, perdas e eventuais mudanças no modelo de melhor desempenho.}
+
+\textcolor{red}{Inserir aqui a identificação do melhor modelo final segundo NDCG@10, seus parâmetros principais e a comparação quantitativa entre a família híbrida e as variantes de aprendizado para ranqueamento (\textit{Learning to Rank}).}
+
+Como limitação atual do protocolo, a versão personalizada da trilha LTR, baseada explicitamente na identidade do usuário durante a ordenação, ainda não integra estas rodadas preliminares. Assim, a comparação inicial permanece concentrada no modelo híbrido de referência e nas variantes da trilha LTR v1.
+
+
+
 
 
 \section{Cronograma}

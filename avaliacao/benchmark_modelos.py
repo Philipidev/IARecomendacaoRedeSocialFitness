@@ -15,6 +15,13 @@ ROOT = Path(__file__).resolve().parent.parent
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
+from dataset_context import dataset_context, manifest_path
+from pipeline_contracts import (
+    normalize_split_config,
+    split_signature,
+    split_signature_from_manifest_file,
+    split_signature_from_metadata,
+)
 from progress_utils import IterationProgress, StageProgress
 from treinamento.model_utils import MODELOS_DIR, merge_model_metadata, now_iso, rel_path
 
@@ -68,6 +75,22 @@ def _split_signature(split_config: dict[str, Any]) -> tuple[float, float, float,
         float(split_config.get("test", 0.15)),
         int(split_config.get("seed", 42)),
     )
+
+
+def _resolve_runtime_root(
+    override: str | None,
+    runtime_default: Path,
+    legacy_default: Path,
+) -> Path:
+    if not override:
+        return runtime_default
+    candidate = _resolve_path(override, runtime_default)
+    try:
+        if candidate.resolve() == legacy_default.resolve():
+            return runtime_default
+    except Exception:
+        pass
+    return candidate
 
 
 def _artifact_size_mb(model_dir: Path) -> float:
@@ -189,6 +212,7 @@ def _coletar_metricas(
     row: dict[str, Any] = {
         "model_id": str(model_cfg["id"]),
         "family": str(model_cfg["family"]),
+        "dataset_key": str(metadata.get("dataset", {}).get("dataset_key", "")),
         "descricao": str(model_cfg.get("descricao", "")),
         "metric_target": str(model_cfg.get("metric_target", METRIC_NDCG_10)),
         "split_seed": int(model_cfg.get("split_config", {}).get("seed", 42)),
@@ -208,6 +232,7 @@ def _coletar_metricas(
         )
         if popularidade_json
         else 0.0,
+        "model_split_signature": split_signature_from_metadata(metadata) or "",
     }
 
     if offline_json:
@@ -223,12 +248,19 @@ def _coletar_metricas(
                 "avg_recency_days": float(business.get("avg_recommended_recency_days", 0.0)),
                 "latencia_p50_ms": float(meta.get("latencia_inferencia_ms_p50", 0.0)),
                 "latencia_p95_ms": float(meta.get("latencia_inferencia_ms_p95", 0.0)),
+                "offline_split_signature": str(meta.get("split_signature", "")),
+                "offline_split_consistente": bool(meta.get("split_consistente", False)),
             }
         )
 
     if metadata.get("ltr", {}).get("best_iteration") is not None:
         row["ltr_best_iteration"] = int(metadata["ltr"]["best_iteration"])
 
+    row["resultado_offline_stale"] = bool(
+        row.get("offline_split_signature")
+        and row.get("model_split_signature")
+        and row["offline_split_signature"] != row["model_split_signature"]
+    )
     metric_target = row["metric_target"]
     row["metric_target_value"] = float(row.get(metric_target, 0.0) or 0.0)
     return row
@@ -248,6 +280,7 @@ def _markdown_benchmark(df: pd.DataFrame, best_row: pd.Series) -> str:
             "precision@10",
             "hitrate@10",
             METRIC_MRR_10,
+            "resultado_offline_stale",
             "tempo_treinamento_s",
             "latencia_p95_ms",
         ]
@@ -275,6 +308,24 @@ def main() -> None:
     parser.add_argument("--config", type=str, default=str(DEFAULT_CONFIG))
     parser.add_argument("--results-dir", type=str, default=str(DEFAULT_RESULTS_DIR))
     parser.add_argument(
+        "--dataset-key",
+        type=str,
+        default=None,
+        help="Namespace lógico do dataset ativo; se omitido, usa layout legado",
+    )
+    parser.add_argument(
+        "--dataset-path",
+        type=str,
+        default=None,
+        help="Caminho opcional do dataset para registrar proveniência nos modelos",
+    )
+    parser.add_argument(
+        "--scale-factor",
+        type=str,
+        default=None,
+        help="Scale factor opcional para registrar proveniência nos modelos",
+    )
+    parser.add_argument(
         "--model-ids",
         nargs="+",
         default=None,
@@ -296,16 +347,35 @@ def main() -> None:
         )
 
     benchmark_cfg = config.get("benchmark", {})
-    results_dir = _resolve_path(
-        benchmark_cfg.get("resultados_dir", args.results_dir), DEFAULT_RESULTS_DIR
+    runtime_context = dataset_context(
+        dataset_key=args.dataset_key,
+        dataset_path=args.dataset_path,
+        scale_factor=args.scale_factor,
     )
-    modelos_root = _resolve_path(benchmark_cfg.get("modelos_dir"), MODELOS_DIR)
+    results_default = runtime_context.results_dir
+    results_override = benchmark_cfg.get("resultados_dir")
+    if results_override is None:
+        if args.dataset_key and args.results_dir == str(DEFAULT_RESULTS_DIR):
+            results_override = None
+        else:
+            results_override = args.results_dir
+    results_dir = _resolve_runtime_root(
+        results_override,
+        results_default,
+        DEFAULT_RESULTS_DIR,
+    )
+    modelos_root = _resolve_runtime_root(
+        benchmark_cfg.get("modelos_dir"),
+        runtime_context.models_dir,
+        MODELOS_DIR,
+    )
     casos_manuais = _resolve_path(
         benchmark_cfg.get("casos_manuais"),
         ROOT / "avaliacao" / "casos_manuais.yaml",
     )
 
     print("=== Benchmark multi-modelo do TCC ===")
+    print(f"Dataset namespace: {runtime_context.dataset_key or 'legado'}")
     print(f"Config          : {config_path}")
     print(f"Resultados      : {results_dir}")
     print(f"Modelos         : {modelos_root}")
@@ -326,7 +396,14 @@ def main() -> None:
     if not casos_manuais.exists():
         print(f"Aviso           : casos manuais não encontrados em {casos_manuais}.")
 
-    _run_python_script(PREPARAR_SCRIPT)
+    preparar_args: list[str] = []
+    if args.dataset_key:
+        preparar_args.extend(["--dataset-key", args.dataset_key])
+    if args.dataset_path:
+        preparar_args.extend(["--dataset-path", args.dataset_path])
+    if args.scale_factor:
+        preparar_args.extend(["--scale-factor", args.scale_factor])
+    _run_python_script(PREPARAR_SCRIPT, preparar_args)
 
     last_split: tuple[float, float, float, int] | None = None
     rows: list[dict[str, Any]] = []
@@ -341,8 +418,10 @@ def main() -> None:
         model_id = str(model_cfg["id"])
         family = str(model_cfg["family"])
         split_cfg = model_cfg.get("split_config", {})
-        split_signature = _split_signature(split_cfg)
-        split_needed = last_split != split_signature
+        split_tuple = _split_signature(split_cfg)
+        split_needed = last_split != split_tuple
+        split_cfg_payload = normalize_split_config(split_cfg)
+        split_signature_hash = split_signature(split_cfg_payload)
         exp_progress = StageProgress(
             total_stages=len(
                 _experiment_step_labels(
@@ -366,17 +445,20 @@ def main() -> None:
             _run_python_script(
                 DIVIDIR_SCRIPT,
                 [
+                    *(["--dataset-key", args.dataset_key] if args.dataset_key else []),
+                    *(["--dataset-path", args.dataset_path] if args.dataset_path else []),
+                    *(["--scale-factor", args.scale_factor] if args.scale_factor else []),
                     "--train",
-                    str(split_signature[0]),
+                    str(split_tuple[0]),
                     "--val",
-                    str(split_signature[1]),
+                    str(split_tuple[1]),
                     "--test",
-                    str(split_signature[2]),
+                    str(split_tuple[2]),
                     "--seed",
-                    str(split_signature[3]),
+                    str(split_tuple[3]),
                 ],
             )
-            last_split = split_signature
+            last_split = split_tuple
 
         model_dir = modelos_root / model_id
         result_dir = results_dir / "modelos" / model_id
@@ -390,6 +472,12 @@ def main() -> None:
             "--experiment-id",
             model_id,
         ]
+        if args.dataset_key:
+            train_args.extend(["--dataset-key", args.dataset_key])
+        if args.dataset_path:
+            train_args.extend(["--dataset-path", args.dataset_path])
+        if args.scale_factor:
+            train_args.extend(["--scale-factor", args.scale_factor])
         training_cfg = model_cfg.get("training", {})
         if training_cfg.get("dataset_completo"):
             train_args.append("--dataset-completo")
@@ -411,13 +499,17 @@ def main() -> None:
                 "enabled": bool(model_cfg.get("enabled", True)),
                 "metric_target": model_cfg.get("metric_target", METRIC_NDCG_10),
                 "top_k": model_cfg.get("top_k", [5, 10, 20]),
-                "split_config": split_cfg,
+                "split_config": split_cfg_payload,
                 "avaliacoes": avaliacoes,
                 "notes": model_cfg.get("notes", ""),
                 "params": params,
                 "benchmark": {
                     "config_path": rel_path(config_path),
                     "result_dir": rel_path(result_dir),
+                },
+                "training": {
+                    "split_config": split_cfg_payload,
+                    "split_signature": split_signature_hash,
                 },
             },
         )
@@ -439,7 +531,7 @@ def main() -> None:
                         "--max-queries",
                         str(params.get("max_queries_otimizacao", 300)),
                         "--seed",
-                        str(split_signature[3]),
+                        str(split_tuple[3]),
                         "--out-csv",
                         str(result_dir / "pesos_experimentos.csv"),
                     ],
@@ -471,7 +563,7 @@ def main() -> None:
                     "--max-queries-val",
                     str(dataset_cfg.get("max_queries_val", 200)),
                     "--seed",
-                    str(dataset_cfg.get("seed", split_signature[3])),
+                    str(dataset_cfg.get("seed", split_tuple[3])),
                     "--features",
                     *features_enabled,
                 ],
@@ -507,7 +599,7 @@ def main() -> None:
                     "--bagging-freq",
                     str(params.get("bagging_freq", 1)),
                     "--seed",
-                    str(params.get("seed", split_signature[3])),
+                    str(params.get("seed", split_tuple[3])),
                 ],
             )
         else:
@@ -599,6 +691,18 @@ def main() -> None:
     payload = {
         "generated_at_utc": now_iso(),
         "config_path": rel_path(config_path),
+        "results_dir": rel_path(results_dir),
+        "modelos_dir": rel_path(modelos_root),
+        "split_signature_at_execution": split_signature_from_manifest_file(
+            manifest_path(runtime_context.splits_dir)
+        ),
+        "unique_model_split_signatures": sorted(
+            {
+                str(row.get("model_split_signature", "")).strip()
+                for row in json_rows
+                if str(row.get("model_split_signature", "")).strip()
+            }
+        ),
         "best_model": json_rows[0],
         "rows": json_rows,
     }

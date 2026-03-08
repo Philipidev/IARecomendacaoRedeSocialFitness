@@ -25,27 +25,52 @@ benchmark multi-modelo a partir de `casos_uso_tcc.json`.
 O fluxo interativo agora também persiste:
 
 - o dataset ativo e o `scale_factor` para auto-download quando o arquivo não estiver disponível
-- o alvo de modelo/experimento selecionado (`treinamento/modelo` ou `treinamento/modelos/<model_id>`)
+- o `dataset_key` canônico derivado do dataset ativo
+- o alvo de modelo/experimento selecionado (`treinamento/modelos/<dataset_key>/modelo_padrao` ou `treinamento/modelos/<dataset_key>/<model_id>`)
 - o subconjunto de `model_id`s escolhido para o benchmark TCC
 
 Com isso, a avaliação deixa de depender implicitamente de `treinamento/modelo`:
 
 - `offline` e `manual` usam o `model_dir` do alvo atual
 - `popularidade` e `otimização` só ficam disponíveis para a família `baseline_hibrido`
-- resultados de experimentos TCC são gravados em `avaliacao/resultados/modelos/<model_id>/...`
+- os scripts inferem `splits` e `output` corretos a partir do `metadata.json` do modelo
+- resultados são gravados em `avaliacao/resultados/<dataset_key>/...`
+
+## Namespaces e proveniência
+
+As avaliações agora seguem o mesmo namespace do dataset ativo:
+
+- `treinamento/modelos/<dataset_key>/<model_id>/`
+- `treinamento/dados/<dataset_key>/splits/`
+- `avaliacao/resultados/<dataset_key>/`
+
+Cada modelo gravado por `treinar.py` registra no `metadata.json`:
+
+- `dataset_key`
+- `dataset_path`
+- `scale_factor`
+- `output_dir`, `dados_dir` e `splits_dir` realmente usados
+
+Com isso, `avaliar_modelo.py`, `avaliar_popularidade.py`,
+`otimizar_pesos.py` e `preparar_dataset_ltr.py` conseguem localizar o dataset
+certo sem depender de paths globais do workspace.
+
+Artefatos globais antigos continuam sendo tratados apenas como compatibilidade
+legada/diagnóstico. O fluxo novo não reutiliza silenciosamente um modelo ou
+split cuja proveniência não bata com o dataset ativo.
 
 ## Scripts disponíveis
 
 - `avaliacao/avaliar_modelo.py`: mede métricas de ranking e de negócio no split de teste
 - `avaliacao/avaliar_popularidade.py`: compara o ranking antes/depois do peso de popularidade
 - `avaliacao/avaliacao_manual.py`: executa cenários qualitativos reproduzíveis
-- `avaliacao/otimizar_pesos.py`: busca pesos melhores para os quatro sinais base e grava `treinamento/modelo/pesos_otimos.json`
+- `avaliacao/otimizar_pesos.py`: busca pesos melhores para os quatro sinais base e grava `pesos_otimos.json` dentro do `model_dir` ativo
 - `avaliacao/benchmark_modelos.py`: orquestra baseline e LTR, avalia todos e consolida a comparação do TCC
 
 ## Avaliação offline do recomendador
 
 Executa a avaliação de qualquer ranker salvo em um `model_dir`, usando os dados
-de teste em `treinamento/dados/splits/`.
+de teste do namespace do dataset do próprio modelo.
 
 ### Comando
 
@@ -53,11 +78,11 @@ de teste em `treinamento/dados/splits/`.
 python avaliacao/avaliar_modelo.py --k 5 10 20
 
 # Avaliar um modelo específico do benchmark TCC
-python avaliacao/avaliar_modelo.py --model-dir treinamento/modelos/ltr_lightgbm_v1 --out-dir avaliacao/resultados/modelos/ltr_lightgbm_v1/offline --k 5 10 20
+python avaliacao/avaliar_modelo.py --model-dir treinamento/modelos/social_network-sf1-CsvBasic-LongDateFormatter/ltr_lightgbm_v1 --out-dir avaliacao/resultados/social_network-sf1-CsvBasic-LongDateFormatter/modelos/ltr_lightgbm_v1/offline --k 5 10 20
 ```
 
-O script grava resultados em `avaliacao/resultados/` nos formatos JSON, CSV e
-Markdown.
+O script grava resultados em `avaliacao/resultados/<dataset_key>/...` nos
+formatos JSON, CSV e Markdown.
 
 ### Protocolo de avaliação
 
@@ -88,10 +113,10 @@ Markdown.
 
 ### Arquivos gerados
 
-- `avaliacao/resultados/metricas_resumo.json`
-- `avaliacao/resultados/metricas_ranking_por_k.csv`
-- `avaliacao/resultados/queries_avaliadas.csv`
-- `avaliacao/resultados/resumo_avaliacao.md`
+- `avaliacao/resultados/<dataset_key>/.../metricas_resumo.json`
+- `avaliacao/resultados/<dataset_key>/.../metricas_ranking_por_k.csv`
+- `avaliacao/resultados/<dataset_key>/.../queries_avaliadas.csv`
+- `avaliacao/resultados/<dataset_key>/.../resumo_avaliacao.md`
 
 ## Avaliação automática de popularidade
 
@@ -101,7 +126,7 @@ Compara o desempenho do ranking com e sem o sinal de popularidade.
 
 ```bash
 # Modo real
-python avaliacao/avaliar_popularidade.py --k 10 --peso-depois 0.10
+python avaliacao/avaliar_popularidade.py --model-dir treinamento/modelos/social_network-sf1-CsvBasic-LongDateFormatter/modelo_padrao --k 10 --peso-depois 0.10
 
 # Modo demo
 python avaliacao/avaliar_popularidade.py --demo --k 10 --peso-depois 0.10
@@ -109,7 +134,7 @@ python avaliacao/avaliar_popularidade.py --demo --k 10 --peso-depois 0.10
 
 ### Saída
 
-Gera `avaliacao/metricas_antes_depois.json` com:
+Gera `avaliacao/resultados/<dataset_key>/.../metricas_antes_depois.json` com:
 
 - `modo`: `real` ou `demo`
 - `config`: configuração usada na execução
@@ -134,7 +159,7 @@ recomendações.
 python avaliacao/avaliacao_manual.py
 
 # Avaliar um model_dir específico e salvar um resumo JSON
-python avaliacao/avaliacao_manual.py --model-dir treinamento/modelos/ltr_lightgbm_v1 --saida-json avaliacao/resultados/modelos/ltr_lightgbm_v1/manual/avaliacao_manual.json
+python avaliacao/avaliacao_manual.py --model-dir treinamento/modelos/social_network-sf1-CsvBasic-LongDateFormatter/ltr_lightgbm_v1 --saida-json avaliacao/resultados/social_network-sf1-CsvBasic-LongDateFormatter/modelos/ltr_lightgbm_v1/manual/avaliacao_manual.json
 ```
 
 Opcionalmente:
@@ -201,13 +226,13 @@ quatro sinais base do score híbrido.
 ### Comando
 
 ```bash
-python avaliacao/otimizar_pesos.py --grid-step 0.1 --top-k 10 --max-queries 300
+python avaliacao/otimizar_pesos.py --model-dir treinamento/modelos/social_network-sf1-CsvBasic-LongDateFormatter/modelo_padrao --grid-step 0.1 --top-k 10 --max-queries 300
 ```
 
 ### Saídas
 
-- `avaliacao/resultados/pesos_experimentos.csv`
-- `treinamento/modelo/pesos_otimos.json`
+- `avaliacao/resultados/<dataset_key>/.../pesos_experimentos.csv`
+- `<model_dir>/pesos_otimos.json`
 
 ## Benchmark multi-modelo do TCC
 
@@ -218,14 +243,14 @@ e gerando uma tabela comparativa consolidada.
 ### Comando
 
 ```bash
-python avaliacao/benchmark_modelos.py --config casos_uso_tcc.json
+python avaliacao/benchmark_modelos.py --config casos_uso_tcc.json --dataset-key social_network-sf1-CsvBasic-LongDateFormatter --dataset-path extracao_filtragem/dataset/social_network-sf1-CsvBasic-LongDateFormatter.tar.zst
 ```
 
 ### Saídas consolidadas
 
-- `avaliacao/resultados/benchmark_modelos.csv`
-- `avaliacao/resultados/benchmark_modelos.md`
-- `avaliacao/resultados/benchmark_modelos.json`
+- `avaliacao/resultados/<dataset_key>/benchmark_modelos.csv`
+- `avaliacao/resultados/<dataset_key>/benchmark_modelos.md`
+- `avaliacao/resultados/<dataset_key>/benchmark_modelos.json`
 
 ### Colunas principais do comparativo
 
@@ -234,4 +259,4 @@ python avaliacao/benchmark_modelos.py --config casos_uso_tcc.json
 - `ndcg@k`, `map@k`, `recall@k`, `precision@k`, `hitrate@k`, `mrr@k`
 - `catalog_coverage`, `diversity`, `novelty`, `avg_recency_days`
 - `tempo_treinamento_s`, `latencia_p50_ms`, `latencia_p95_ms`, `artifact_size_mb`
-- `split_seed`, `split_config`, `feature_set`, `params_resumidos`, `model_dir`
+- `dataset_key`, `split_seed`, `split_config`, `feature_set`, `params_resumidos`, `model_dir`

@@ -20,45 +20,75 @@ Use um dos datasets completos do [SURF/CWI](https://repository.surfsara.nl/commu
 │   ├── benchmark_modelos.py     # Runner multi-modelo do TCC
 │   └── resultados/              # Relatórios e comparativos (gerado)
 ├── extracao_filtragem/          # Extração e filtragem
-│   ├── dataset/                # Dataset bruto (.tar.zst)
-│   ├── download_dataset.py     # Script de download
-│   ├── pipeline.py             # Script principal
-│   ├── ldbc_snb/               # Dados extraídos do .tar.zst
-│   └── output/                 # Parquets gerados
-│       ├── interactions_fitness.parquet
-│       ├── messages_fitness.parquet
-│       ├── tags_fitness.parquet
-│       ├── user_interests_fitness.parquet
-│       ├── user_social_graph.parquet
-│       └── tag_cooccurrence.parquet
+│   ├── dataset/                 # Dataset bruto (.tar.zst)
+│   ├── download_dataset.py      # Script de download
+│   ├── pipeline.py              # Script principal
+│   ├── ldbc_snb/                # Staging extraído por dataset_key
+│   │   └── <dataset_key>/
+│   └── output/                  # Parquets gerados por dataset_key
+│       └── <dataset_key>/
+│           ├── dataset_manifest.json
+│           ├── interactions_fitness.parquet
+│           ├── messages_fitness.parquet
+│           ├── tags_fitness.parquet
+│           ├── user_interests_fitness.parquet
+│           ├── user_social_graph.parquet
+│           └── tag_cooccurrence.parquet
 └── treinamento/                # IA de recomendação
-    ├── preparacao_dados.py     # Feature engineering a partir dos parquets
-    ├── treinar.py              # Treina e serializa os artefatos do modelo
-    ├── preparar_dataset_ltr.py # Monta datasets query-item para LTR
-    ├── treinar_ltr.py          # Treina o LightGBMRanker
-    ├── recomendar.py           # Inferência — função recomendar() + CLI
-    ├── rankers.py              # Abstração plugável de rankers
-    ├── dados/                  # Artefatos intermediários (gerado)
-    │   ├── posts_metadata.parquet
-    │   ├── interacoes_por_tag.parquet
-    │   ├── social_scores.parquet
-    │   ├── user_tag_profile.parquet
-    │   └── tag_lista.txt
-    ├── modelo/                 # Modelo padrão/legado (gerado)
-    │   ├── vectorizer.pkl
-    │   ├── post_matrix.npy
-    │   ├── tag_cooccurrence_map.pkl
-    │   ├── popularidade.npy
-    │   └── social_scores.npy
-    └── modelos/                # Modelos por experimento do benchmark (gerado)
+    ├── preparacao_dados.py      # Feature engineering a partir dos parquets
+    ├── treinar.py               # Treina e serializa os artefatos do modelo
+    ├── preparar_dataset_ltr.py  # Monta datasets query-item para LTR
+    ├── treinar_ltr.py           # Treina o LightGBMRanker
+    ├── recomendar.py            # Inferência — função recomendar() + CLI
+    ├── rankers.py               # Abstração plugável de rankers
+    ├── dados/                   # Artefatos intermediários por dataset_key
+    │   └── <dataset_key>/
+    │       ├── dataset_manifest.json
+    │       ├── posts_metadata.parquet
+    │       ├── interacoes_por_tag.parquet
+    │       ├── social_scores.parquet
+    │       ├── user_tag_profile.parquet
+    │       └── splits/
+    │           ├── dataset_manifest.json
+    │           ├── train_posts.parquet
+    │           ├── val_posts.parquet
+    │           └── test_posts.parquet
+    ├── modelo/                  # Modelo padrão/legado (compatibilidade)
+    └── modelos/                 # Modelos por dataset_key/experimento (gerado)
+        └── <dataset_key>/
 ```
 
 ## Pré-requisitos
 
 - Python 3.11+
-- DuckDB (`pip install -r requirements.txt`)
 - zstd (Linux: `apt install zstd`; Windows: [releases](https://github.com/facebook/zstd/releases))
 - tar (Windows 10+ inclui)
+
+### Ambiente Anaconda
+
+Recomenda-se usar um ambiente dedicado para o projeto. No Windows, prefira executar os comandos em um `Anaconda Prompt`.
+
+```bash
+conda create -n ia-recomendacao-fitness python=3.11 -y
+conda activate ia-recomendacao-fitness
+python -m pip install --upgrade pip
+python -m pip install -r requirements.txt
+```
+
+Para remover o ambiente por completo e recriá-lo do zero:
+
+```bash
+conda env remove -n ia-recomendacao-fitness
+```
+
+Para confirmar que o terminal está usando o ambiente correto:
+
+```bash
+python --version
+python -c "import sys; print(sys.executable)"
+```
+
+Com o ambiente ativado, o fluxo completo do projeto pode ser executado por esse mesmo terminal, incluindo `python main.py` e os scripts de `extracao_filtragem/`, `treinamento/` e `avaliacao/`.
 
 ## Orquestrador Interativo
 
@@ -87,11 +117,49 @@ TCC e o histórico das últimas execuções por etapa.
 
 No fluxo interativo:
 
-- o alvo pode ser o `treinamento/modelo/` padrão ou um experimento de `casos_uso_tcc.json`
+- o dataset ativo define um `dataset_key` canônico e, com isso, todos os paths efetivos de extração, dados, splits, modelos e resultados
+- o alvo pode ser o modelo padrão do namespace ativo (`treinamento/modelos/<dataset_key>/modelo_padrao/`) ou um experimento de `casos_uso_tcc.json`
 - treino e avaliação passam a respeitar o `model_dir` do alvo selecionado
 - avaliações de `popularidade` e `otimização` só aparecem como compatíveis para a família baseline
 - se o dataset selecionado estiver ausente localmente, o `main.py` tenta baixá-lo automaticamente pelo `scale_factor` salvo
 - o benchmark TCC pode rodar todos os modelos habilitados ou apenas um subconjunto escolhido no menu
+- o orquestrador bloqueia reutilização silenciosa de artefatos quando a proveniência do dataset diverge do dataset ativo
+
+## Namespaces por Dataset
+
+O projeto agora isola os artefatos por `dataset_key`, derivado do nome do
+arquivo selecionado, por exemplo:
+
+- `social_network-sf1-CsvBasic-LongDateFormatter.tar.zst` -> `social_network-sf1-CsvBasic-LongDateFormatter`
+- `social_network-sf30-CsvBasic-LongDateFormatter.tar.zst` -> `social_network-sf30-CsvBasic-LongDateFormatter`
+
+Com isso, o mesmo workspace pode manter extrações, dados, splits, modelos e
+resultados de múltiplos datasets ao mesmo tempo, sem precisar apagar diretórios
+anteriores.
+
+### Layout novo
+
+- `extracao_filtragem/ldbc_snb/<dataset_key>/`
+- `extracao_filtragem/output/<dataset_key>/`
+- `treinamento/dados/<dataset_key>/`
+- `treinamento/dados/<dataset_key>/splits/`
+- `treinamento/modelos/<dataset_key>/<model_id>/`
+- `avaliacao/resultados/<dataset_key>/`
+
+### Proveniência forte
+
+- `output/<dataset_key>/dataset_manifest.json` registra o dataset bruto e o resumo da extração
+- `dados/<dataset_key>/dataset_manifest.json` registra a preparação de dados
+- `dados/<dataset_key>/splits/dataset_manifest.json` registra o split usado
+- cada `metadata.json` de modelo passa a gravar `dataset_key`, `dataset_path`, `scale_factor` e os diretórios efetivamente usados no treino
+
+### Compatibilidade com artefatos legados
+
+Os caminhos antigos e globais, como `extracao_filtragem/output/`,
+`treinamento/dados/` e `treinamento/modelo/`, continuam existindo apenas como
+camada de compatibilidade/diagnóstico. No fluxo novo, o `main.py` prioriza
+sempre o namespace do dataset ativo e não reutiliza artefatos globais sem
+proveniência compatível.
 
 ## Execução Manual
 
@@ -107,7 +175,7 @@ Scale factors: `sf0.1` (~18 MB), `sf0.3`, `sf1`, `sf3`, `sf10`, `sf30` (~20 GB).
 ### 2. Rodar o pipeline
 
 ```bash
-python extracao_filtragem/pipeline.py --dataset-path extracao_filtragem/dataset/social_network-sf0.1-CsvBasic-LongDateFormatter.tar.zst
+python extracao_filtragem/pipeline.py --dataset-path extracao_filtragem/dataset/social_network-sf0.1-CsvBasic-LongDateFormatter.tar.zst --dataset-key social_network-sf0.1-CsvBasic-LongDateFormatter
 ```
 
 Ou, se o dataset estiver no caminho padrão após o download:
@@ -134,15 +202,17 @@ python extracao_filtragem/pipeline.py
 ### 1. Preparar os dados
 
 ```bash
-python treinamento/preparacao_dados.py
+python treinamento/preparacao_dados.py --dataset-key social_network-sf0.1-CsvBasic-LongDateFormatter
 ```
 
-Lê os parquets de `extracao_filtragem/output/` e gera artefatos intermediários em `treinamento/dados/`, incluindo `social_scores.parquet` e `user_tag_profile.parquet`.
+Lê os parquets de `extracao_filtragem/output/<dataset_key>/` e gera artefatos
+intermediários em `treinamento/dados/<dataset_key>/`, incluindo
+`social_scores.parquet` e `user_tag_profile.parquet`.
 
 ### 2. Dividir o dataset
 
 ```bash
-python treinamento/dividir_dataset.py
+python treinamento/dividir_dataset.py --dataset-key social_network-sf0.1-CsvBasic-LongDateFormatter
 ```
 
 Divide os posts em treino (70%), validação (15%) e teste (15%). Recalcula co-ocorrência e scores sociais usando apenas dados de treino.
@@ -150,31 +220,33 @@ Divide os posts em treino (70%), validação (15%) e teste (15%). Recalcula co-o
 ### 3. Treinar o modelo
 
 ```bash
-python treinamento/treinar.py
+python treinamento/treinar.py --dataset-key social_network-sf0.1-CsvBasic-LongDateFormatter --dataset-path extracao_filtragem/dataset/social_network-sf0.1-CsvBasic-LongDateFormatter.tar.zst
 ```
 
-Ajusta o `MultiLabelBinarizer` sobre os nomes das tags, computa a matriz de posts e serializa os artefatos em `treinamento/modelo/`, incluindo `social_scores.npy`.
+Ajusta o `MultiLabelBinarizer` sobre os nomes das tags, computa a matriz de
+posts e serializa os artefatos no `model_dir` escolhido, gravando também a
+proveniência do dataset no `metadata.json`.
 
 Para os experimentos do TCC, existe o modo com catálogo completo e estatísticas
 calculadas só no split de treino:
 
 ```bash
-python treinamento/treinar.py --catalogo-completo --model-dir treinamento/modelos/baseline_hibrido_padrao
+python treinamento/treinar.py --catalogo-completo --dataset-key social_network-sf0.1-CsvBasic-LongDateFormatter --model-dir treinamento/modelos/social_network-sf0.1-CsvBasic-LongDateFormatter/baseline_hibrido_padrao
 ```
 
 ### 3A. Benchmark multi-modelo com LTR
 
 ```bash
-python avaliacao/benchmark_modelos.py --config casos_uso_tcc.json
+python avaliacao/benchmark_modelos.py --config casos_uso_tcc.json --dataset-key social_network-sf0.1-CsvBasic-LongDateFormatter --dataset-path extracao_filtragem/dataset/social_network-sf0.1-CsvBasic-LongDateFormatter.tar.zst
 ```
 
 Esse fluxo lê `casos_uso_tcc.json`, treina múltiplos modelos baseline e LTR,
-salva cada experimento em `treinamento/modelos/<model_id>/` e gera o comparativo
+sintetiza cada experimento em `treinamento/modelos/<dataset_key>/<model_id>/` e gera o comparativo
 consolidado em:
 
-- `avaliacao/resultados/benchmark_modelos.csv`
-- `avaliacao/resultados/benchmark_modelos.md`
-- `avaliacao/resultados/benchmark_modelos.json`
+- `avaliacao/resultados/<dataset_key>/benchmark_modelos.csv`
+- `avaliacao/resultados/<dataset_key>/benchmark_modelos.md`
+- `avaliacao/resultados/<dataset_key>/benchmark_modelos.json`
 
 Pelo `main.py`, o benchmark também pode ser parametrizado para executar:
 
@@ -259,7 +331,7 @@ a afinidade usuário-item substitui o sinal de popularidade.
 
 ---
 
-## Saídas (`extracao_filtragem/output/`)
+## Saídas (`extracao_filtragem/output/<dataset_key>/`)
 
 ### Arquivos principais
 
