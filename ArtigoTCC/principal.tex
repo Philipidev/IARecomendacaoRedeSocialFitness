@@ -154,7 +154,7 @@ O \textit{LightGBMRanker} é um algoritmo específico utilizado em tarefas de ra
 
 Em tarefas de ranqueamento, a avaliação precisa considerar não apenas se um item relevante foi recuperado, mas também a posição em que ele aparece na lista. Por essa razão, métricas de ordenação são particularmente importantes na análise de sistemas de recomendação.
 
-A \textit{Normalized Discounted Cumulative Gain} (\textit{NDCG}) permite avaliar se os itens mais relevantes estão concentrados nas primeiras posições da lista \cite{Jarvelin2002NDCG}. Ela atribui pesos maiores aos acertos no topo da lista e penaliza acertos em posições inferiores. Já a \textit{Mean Reciprocal Rank} (\textit{MRR}) enfatiza quão cedo surge o primeiro item relevante para cada consulta \cite{Craswell2009MRR}, sendo calculada pelo inverso da posição do primeiro acerto. Ambas as métricas são fundamentais para mensurar a eficácia de algoritmos de ranqueamento em cenários onde a atenção do usuário é limitada aos primeiros resultados.
+A \textit{Normalized Discounted Cumulative Gain} (\textit{NDCG}) permite avaliar se os itens mais relevantes estão concentrados nas primeiras posições da lista \cite{Jarvelin2002NDCG}. Ela atribui pesos maiores aos acertos no topo da lista e penaliza acertos em posições inferiores. Já a \textit{Mean Reciprocal Rank} (\textit{MRR}) enfatiza quão cedo surge o primeiro item relevante para cada consulta \cite{Craswell2009MRR}, sendo calculada pelo inverso da posição do primeiro acerto. Ambas as métricas são fundamentais para mensurar a eficácia de algoritmos de ranqueamento, especialmente em cenários onde a atenção do usuário é limitada aos primeiros resultados.
 
 
 
@@ -263,7 +263,9 @@ Pares de coocorrência de \textit{tags} & 1.157 \\
 
 Na segunda etapa, os arquivos extraídos foram convertidos em artefatos próprios para treinamento. Entre eles, destacam-se os metadados semânticos dos posts, a contagem de interações por \textit{tag}, os escores de influência social por post e os perfis usuário-\textit{tag}. Em seguida, os dados foram divididos em treino, validação e teste, nas proporções de 70\%, 15\% e 15\%, respectivamente. 
 
-Essa divisão estática foi escolhida em detrimento da Validação Cruzada (\textit{Cross Validation}) para evitar o vazamento de dados (\textit{data leakage}). No contexto deste sistema, atributos complexos como a coocorrência de \textit{tags} e os escores de influência do grafo social precisam ser recalculados \textbf{exclusivamente} com os dados do conjunto de treino. Se a Validação Cruzada fosse aplicada, o custo computacional de reconstruir e recalcular o grafo social a cada \textit{fold} seria proibitivo, além de introduzir o risco de que interações futuras (do conjunto de teste) influenciassem os pesos aprendidos no treinamento.
+Essa proporção foi escolhida por seguir práticas amplamente adotadas na literatura de aprendizado de máquina, nas quais os dados são divididos em conjuntos de treinamento, validação e teste (GOODFELLOW; BENGIO; COURVILLE, 2016; HASTIE; TIBSHIRANI; FRIEDMAN, 2009). Dessa forma, utiliza-se a maior parte dos dados para o treinamento (70%), enquanto subconjuntos menores são reservados para o ajuste de hiperparâmetros (15% em validação) e para a avaliação final e imparcial do desempenho do modelo (15% em teste).
+
+Além disso, essa divisão estática foi escolhida em detrimento da Validação Cruzada (\textit{Cross Validation}) para evitar o vazamento de dados (\textit{data leakage}). No contexto deste sistema, atributos complexos como a coocorrência de \textit{tags} e os escores de influência do grafo social precisam ser recalculados \textbf{exclusivamente} com os dados do conjunto de treino. Se a Validação Cruzada fosse aplicada, além do custo computacional proibitivo de reconstruir e recalcular o grafo social a cada \textit{fold}, haveria o risco de que interações futuras (do conjunto de teste) influenciassem os pesos aprendidos no treinamento, comprometendo a validade da avaliação.
 
 \subsubsection{Modelo híbrido de referência (\textit{Baseline})}
 
@@ -357,9 +359,9 @@ A sigla LTR, utilizada na Tabela \ref{tab:configuracoes_benchmark_tcc}, refere-s
 \hline
 Inicial & \texttt{SF0.1} & Fluxo completo validado e primeira leitura comparativa concluída. \\
 \hline
-Intermediária & \textcolor{red}{definir próxima versão, como \texttt{SF1}} & Verificar o comportamento das métricas com maior volume de dados. \\
+Intermediária & \texttt{SF1} & Verificar o comportamento das métricas com maior volume de dados. \\
 \hline
-Final & \textcolor{red}{definir versão final} & Consolidar os resultados a serem apresentados na versão final do TCC. \\
+Final & \texttt{SF30} & Consolidar os resultados a serem apresentados na versão final do TCC. \\
 \hline
 \end{tabular}
 \end{table}
@@ -463,16 +465,16 @@ A ampliação progressiva da base, passando da versão SF0.1 para versões maior
 \hline
 Inicial & \texttt{SF0.1} & \textit{Baseline} padrão & 0,0000 & 0,9737 & Empate em NDCG@10 entre todos os modelos; amostra de 5 consultas válidas. \\
 \hline
-Intermediária & \textcolor{red}{definir, como \texttt{SF1}} & \textcolor{red}{a preencher} & \textcolor{red}{a preencher} & \textcolor{red}{a preencher} & \textcolor{red}{a preencher} \\
+Intermediária & \texttt{SF1} & \textit{a preencher} & \textit{a preencher} & \textit{a preencher} & \textit{a preencher} \\
 \hline
-Final & \textcolor{red}{definir} & \textcolor{red}{a preencher} & \textcolor{red}{a preencher} & \textcolor{red}{a preencher} & \textcolor{red}{a preencher} \\
+Final & \texttt{SF30} & \textit{a preencher} & \textit{a preencher} & \textit{a preencher} & \textit{a preencher} \\
 \hline
 \end{tabular}
 \end{table}
 
-\textcolor{red}{Inserir aqui a discussão sobre o comportamento das métricas quando a versão da base aumentar, destacando ganhos, perdas e eventuais mudanças no modelo de melhor desempenho.}
+\textit{[Nota para a versão final: Inserir aqui a discussão sobre o comportamento das métricas quando a versão da base aumentar, destacando ganhos, perdas e eventuais mudanças no modelo de melhor desempenho.]}
 
-\textcolor{red}{Inserir aqui a identificação do melhor modelo final segundo NDCG@10, seus parâmetros principais e a comparação quantitativa entre a família híbrida e as variantes de aprendizado para ranqueamento (\textit{Learning to Rank}).}
+\textit{[Nota para a versão final: Inserir aqui a identificação do melhor modelo final segundo NDCG@10, seus parâmetros principais e a comparação quantitativa entre a família híbrida e as variantes de aprendizado para ranqueamento (\textit{Learning to Rank}).]}
 
 Como limitação atual do protocolo, a versão personalizada da trilha LTR, baseada explicitamente na identidade do usuário durante a ordenação, ainda não integra estas rodadas preliminares. Assim, a comparação inicial permanece concentrada no modelo híbrido de referência e nas variantes da trilha LTR v1.
 
