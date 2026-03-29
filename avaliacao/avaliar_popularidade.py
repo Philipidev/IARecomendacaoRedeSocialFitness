@@ -64,13 +64,11 @@ def precision_at_k(relevantes: set[int], recomendados: list[int], k: int) -> flo
 
 
 def ndcg_at_k(relevantes: set[int], recomendados: list[int], k: int) -> float:
-    gains = np.array([1.0 if item in relevantes else 0.0 for item in recomendados[:k]], dtype=np.float32)
-    if gains.size == 0:
-        return 0.0
-    discounts = 1.0 / np.log2(np.arange(2, gains.size + 2))
-    dcg = float((gains * discounts).sum())
-    ideal = np.array([1.0] * min(len(relevantes), k), dtype=np.float32)
-    idcg = float((ideal * discounts).sum())
+    gains = [1.0 if item in relevantes else 0.0 for item in recomendados[:k]]
+    dcg = sum(g / np.log2(i + 2) for i, g in enumerate(gains))
+
+    ideal = [1.0] * min(len(relevantes), k)
+    idcg = sum(g / np.log2(i + 2) for i, g in enumerate(ideal))
     return dcg / idcg if idcg > 0 else 0.0
 
 
