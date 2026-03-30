@@ -58,11 +58,18 @@ def _render(request: Request, template: str, context: dict[str, Any]) -> HTMLRes
 async def dashboard(request: Request):
     state = _fresh_state()
     details = svc.service_get_state_details(state)
+    targets = svc.service_list_model_targets(state)
+    family = str((state.get("selected_model_target") or {}).get("family", "baseline_hibrido"))
+    eval_modes = svc.service_get_eval_modes(family)
     return _render(request, "dashboard.html", {
         "state": state,
         "details": details,
         "exec_status": executor.get_status(),
         "history": _load_history()[:20],
+        "datasets": details["datasets"],
+        "targets": targets,
+        "eval_modes": eval_modes,
+        "download_options": svc.DOWNLOAD_OPTIONS,
     })
 
 
