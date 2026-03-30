@@ -1,0 +1,82 @@
+<section class="actions-panel card">
+    <h2>Acoes</h2>
+
+    {% set running = exec_status.status == 'running' %}
+
+    <div class="actions-grid">
+
+        <!-- Selecao de Dataset -->
+        <div class="action-group">
+            <h3>Dataset</h3>
+            <form id="form-select-dataset" onsubmit="return submitAction(event, '/api/select-dataset')">
+                <select name="index" {% if running %}disabled{% endif %}>
+                    {% for ds in datasets %}
+                    <option value="{{ loop.index0 }}">{{ ds.name }} ({{ ds.scale_factor or 'sem sf' }}, {{ ds.size_human }})</option>
+                    {% endfor %}
+                </select>
+                <button type="submit" {% if running or not datasets %}disabled{% endif %}>Selecionar</button>
+            </form>
+            <form id="form-download-dataset" onsubmit="return submitAction(event, '/api/download-dataset')">
+                <select name="scale_factor" {% if running %}disabled{% endif %}>
+                    {% for opt in download_options %}
+                    <option value="{{ opt.scale_factor }}">{{ opt.scale_factor }} ({{ opt.size }}) - {{ opt.descricao }}</option>
+                    {% endfor %}
+                </select>
+                <button type="submit" {% if running %}disabled{% endif %}>Baixar</button>
+            </form>
+        </div>
+
+        <!-- Selecao de Modelo -->
+        <div class="action-group">
+            <h3>Modelo / Experimento</h3>
+            <form id="form-select-model" onsubmit="return submitAction(event, '/api/select-model')">
+                <select name="index" {% if running %}disabled{% endif %}>
+                    {% for t in targets %}
+                    <option value="{{ t.index }}">{{ t.label }}</option>
+                    {% endfor %}
+                </select>
+                <button type="submit" {% if running %}disabled{% endif %}>Selecionar Alvo</button>
+            </form>
+        </div>
+
+        <!-- Pipeline -->
+        <div class="action-group">
+            <h3>Pipeline</h3>
+            <div class="button-row">
+                <button onclick="runAction('/api/run/extraction')" {% if running %}disabled{% endif %}>Rodar Extracao</button>
+                <button onclick="runAction('/api/run/training')" {% if running %}disabled{% endif %}>Rodar Treinamento</button>
+            </div>
+        </div>
+
+        <!-- Avaliacao -->
+        <div class="action-group">
+            <h3>Avaliacao</h3>
+            <form id="form-evaluation" onsubmit="return submitEvaluation(event)">
+                {% for mode in eval_modes %}
+                <label class="checkbox-label">
+                    <input type="checkbox" name="modes" value="{{ mode.id }}"
+                           {% if running %}disabled{% endif %}>
+                    {{ mode.label }}
+                </label>
+                {% endfor %}
+                <button type="submit" {% if running %}disabled{% endif %}>Rodar Avaliacao</button>
+            </form>
+        </div>
+
+        <!-- Benchmark TCC -->
+        <div class="action-group">
+            <h3>Benchmark TCC</h3>
+            <button onclick="runAction('/api/run/benchmark')" {% if running %}disabled{% endif %}>Rodar Benchmark</button>
+        </div>
+
+        <!-- Combinacoes -->
+        <div class="action-group">
+            <h3>Combinacoes</h3>
+            <div class="button-row">
+                <button onclick="runAction('/api/run/full-pipeline')" {% if running %}disabled{% endif %}>Pipeline Completo</button>
+                <button onclick="runAction('/api/run/training-evaluation')" {% if running %}disabled{% endif %}>Treinamento + Avaliacao</button>
+            </div>
+        </div>
+
+    </div>
+</section>

@@ -1,0 +1,64 @@
+<section class="status-cards">
+    <h2>Status dos Artefatos</h2>
+    <div class="cards-grid">
+
+        <div class="status-card {{ 'ok' if details.artifacts.extracao.ready else 'pending' }}">
+            <div class="card-title">Extracao</div>
+            <div class="card-badge">{{ 'OK' if details.artifacts.extracao.ready else 'PENDENTE' }}</div>
+            <div class="card-detail">{{ details.artifacts.extracao.existing }}/{{ details.artifacts.extracao.total }} arquivos</div>
+        </div>
+
+        <div class="status-card {{ 'ok' if details.artifacts.dados.ready else 'pending' }}">
+            <div class="card-title">Dados</div>
+            <div class="card-badge">{{ 'OK' if details.artifacts.dados.ready else 'PENDENTE' }}</div>
+        </div>
+
+        <div class="status-card {{ 'ok' if details.artifacts.splits.ready else 'pending' }}">
+            <div class="card-title">Splits</div>
+            <div class="card-badge">{{ 'OK' if details.artifacts.splits.ready else 'PENDENTE' }}</div>
+        </div>
+
+        <div class="status-card {{ 'ok' if details.artifacts.modelo_alvo.ready else 'pending' }}">
+            <div class="card-title">Modelo Alvo</div>
+            <div class="card-badge">{{ 'OK' if details.artifacts.modelo_alvo.ready else 'PENDENTE' }}</div>
+            <div class="card-detail mono">{{ details.artifacts.modelo_alvo.family }}</div>
+        </div>
+
+    </div>
+
+    <h2>Avaliacoes</h2>
+    <div class="cards-grid">
+
+        <div class="status-card {{ 'ok' if details.avaliacao.can_run.offline else 'pending' }}">
+            <div class="card-title">Offline</div>
+            <div class="card-badge">{{ 'OK' if details.avaliacao.can_run.offline else 'PENDENTE' }}</div>
+        </div>
+
+        <div class="status-card {{ 'ok' if details.avaliacao.can_run.popularidade else 'pending' }}">
+            <div class="card-title">Popularidade</div>
+            <div class="card-badge">{{ 'OK' if details.avaliacao.can_run.popularidade else 'PENDENTE' }}</div>
+            {% if details.artifacts.modelo_alvo.family != 'baseline_hibrido' %}
+            <div class="card-detail muted">Somente baseline_hibrido</div>
+            {% endif %}
+        </div>
+
+        <div class="status-card {{ 'ok' if details.avaliacao.can_run.manual else 'pending' }}">
+            <div class="card-title">Manual</div>
+            <div class="card-badge">{{ 'OK' if details.avaliacao.can_run.manual else 'PENDENTE' }}</div>
+        </div>
+
+        <div class="status-card {{ 'ok' if details.avaliacao.can_run.otimizacao else 'pending' }}">
+            <div class="card-title">Otimizacao</div>
+            <div class="card-badge">{{ 'OK' if details.avaliacao.can_run.otimizacao else 'PENDENTE' }}</div>
+            {% if details.artifacts.modelo_alvo.family != 'baseline_hibrido' %}
+            <div class="card-detail muted">Somente baseline_hibrido</div>
+            {% endif %}
+        </div>
+
+        <div class="status-card {{ 'ok' if details.avaliacao.can_run.benchmark_tcc else 'pending' }}">
+            <div class="card-title">Benchmark TCC</div>
+            <div class="card-badge">{{ 'OK' if details.avaliacao.can_run.benchmark_tcc else 'PENDENTE' }}</div>
+        </div>
+
+    </div>
+</section>

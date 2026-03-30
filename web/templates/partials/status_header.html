@@ -1,0 +1,55 @@
+<section class="status-header card">
+    <div class="header-grid">
+        <div class="header-item">
+            <span class="label">Dataset ativo</span>
+            <span class="value">{{ details.dataset_label }}</span>
+        </div>
+        {% if details.selected_dataset %}
+        <div class="header-item">
+            <span class="label">dataset_key</span>
+            <span class="value mono">{{ details.selected_dataset.dataset_key or '-' }}</span>
+        </div>
+        <div class="header-item">
+            <span class="label">scale_factor</span>
+            <span class="value mono">{{ details.selected_dataset.scale_factor or '-' }}</span>
+        </div>
+        {% endif %}
+        <div class="header-item">
+            <span class="label">Modelo alvo</span>
+            <span class="value">{{ details.model_target_label }}</span>
+        </div>
+        {% if details.artifacts.modelo_alvo %}
+        <div class="header-item">
+            <span class="label">Familia</span>
+            <span class="value mono">{{ details.artifacts.modelo_alvo.family }}</span>
+        </div>
+        {% endif %}
+        <div class="header-item">
+            <span class="label">Benchmark TCC</span>
+            <span class="value">{{ details.benchmark_label }}</span>
+        </div>
+        <div class="header-item">
+            <span class="label">Atualizado em</span>
+            <span class="value mono">{{ details.updated_at[:19] if details.updated_at else '-' }}</span>
+        </div>
+    </div>
+
+    {% if not details.extraction_matches %}
+    <div class="alert alert-warning">
+        O dataset selecionado difere do dataset usado na ultima extracao.
+    </div>
+    {% endif %}
+
+    {% if details.namespace %}
+    <details class="namespace-details">
+        <summary>Caminhos do namespace ativo</summary>
+        <ul class="mono">
+            <li><strong>output_dir:</strong> {{ details.namespace.output_dir or '-' }}</li>
+            <li><strong>dados_dir:</strong> {{ details.namespace.dados_dir or '-' }}</li>
+            <li><strong>splits_dir:</strong> {{ details.namespace.splits_dir or '-' }}</li>
+            <li><strong>models_dir:</strong> {{ details.namespace.models_dir or '-' }}</li>
+            <li><strong>results_dir:</strong> {{ details.namespace.results_dir or '-' }}</li>
+        </ul>
+    </details>
+    {% endif %}
+</section>

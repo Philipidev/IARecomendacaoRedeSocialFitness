@@ -1,0 +1,32 @@
+<section class="execution-panel card">
+    <h2>
+        Execucao Atual
+        <span id="exec-status-badge" class="exec-badge {{ exec_status.status }}">{{ exec_status.status | upper }}</span>
+    </h2>
+
+    <div id="exec-task-label" class="exec-task">
+        {% if exec_status.task %}{{ exec_status.task }}{% else %}Nenhuma execucao ativa{% endif %}
+    </div>
+
+    <div id="exec-stage" class="exec-stage" style="display:none;">
+        <span id="exec-stage-label"></span>
+        <span id="exec-stage-step" class="mono"></span>
+    </div>
+
+    <div class="progress-container" id="progress-container" style="display:none;">
+        <div class="progress-bar" id="progress-bar" style="width: 0%;">
+            <span id="progress-text">0%</span>
+        </div>
+    </div>
+
+    <div id="exec-detail" class="exec-detail mono"></div>
+
+    {% if exec_status.status == 'running' %}
+    <button id="btn-cancel" onclick="cancelExecution()" class="btn-danger">Cancelar</button>
+    {% endif %}
+
+    <details class="log-console" {% if exec_status.status == 'running' %}open{% endif %}>
+        <summary>Console de logs</summary>
+        <pre id="log-output" class="log-output"></pre>
+    </details>
+</section>

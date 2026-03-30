@@ -1,0 +1,36 @@
+{% extends "base.html" %}
+{% block content %}
+
+<div id="status-header"
+     hx-get="/partials/status-header"
+     hx-trigger="state-updated from:body"
+     hx-swap="innerHTML">
+    {% include "partials/status_header.html" %}
+</div>
+
+<div id="status-cards"
+     hx-get="/partials/status-cards"
+     hx-trigger="state-updated from:body"
+     hx-swap="innerHTML">
+    {% include "partials/status_cards.html" %}
+</div>
+
+<div id="actions-panel"
+     hx-get="/partials/actions-panel"
+     hx-trigger="state-updated from:body"
+     hx-swap="innerHTML">
+    {% include "partials/actions_panel.html" %}
+</div>
+
+<div id="execution-panel">
+    {% include "partials/execution_panel.html" %}
+</div>
+
+<div id="history-panel"
+     hx-get="/partials/history-panel"
+     hx-trigger="state-updated from:body"
+     hx-swap="innerHTML">
+    {% include "partials/history_panel.html" %}
+</div>
+
+{% endblock %}

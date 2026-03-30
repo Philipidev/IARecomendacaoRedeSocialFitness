@@ -63,3 +63,5 @@ desktop.ini
 *.tmp
 *.bak
 .pipeline_state.json
+.execution_history.json
+.execution_logs/

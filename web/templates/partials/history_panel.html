@@ -1,0 +1,35 @@
+<section class="history-panel card">
+    <h2>Historico de Execucoes</h2>
+    {% if history %}
+    <table class="history-table">
+        <thead>
+            <tr>
+                <th>ID</th>
+                <th>Acao</th>
+                <th>Inicio</th>
+                <th>Fim</th>
+                <th>Status</th>
+                <th>Etapas</th>
+                <th>Logs</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for entry in history %}
+            <tr class="history-{{ entry.status }}">
+                <td class="mono">{{ entry.id }}</td>
+                <td>{{ entry.action }}</td>
+                <td class="mono">{{ entry.started_at[:19] if entry.started_at else '-' }}</td>
+                <td class="mono">{{ entry.finished_at[:19] if entry.finished_at else '-' }}</td>
+                <td>
+                    <span class="exec-badge {{ entry.status }}">{{ entry.status | upper }}</span>
+                </td>
+                <td>{{ entry.steps or '-' }}</td>
+                <td class="mono">{{ entry.log_file or '-' }}</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    {% else %}
+    <p class="muted">Nenhuma execucao registrada.</p>
+    {% endif %}
+</section>
