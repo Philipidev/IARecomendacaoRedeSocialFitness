@@ -386,9 +386,9 @@ Para mensurar a qualidade do ranqueamento, foram adotadas métricas que consider
 Em complemento, a avaliação inclui métricas de interesse prático para o sistema. A cobertura de catálogo indica quanto do catálogo total aparece nas recomendações; a diversidade intra-lista por \textit{tags} mede a variedade temática dentro de cada lista; a novidade baseada em popularidade inversa verifica se o sistema também recomenda itens menos óbvios; a recência média recomendada mede a distância temporal média dos conteúdos sugeridos; e a latência de inferência registra o tempo necessário para produzir a recomendação. No \textit{benchmark} configurado para o TCC, a métrica-alvo principal para seleção do melhor modelo é o NDCG@10, porque ela combina relevância e posição dos itens na lista.
 
 
-\subsection{Resultados da versão inicial}
+\subsection{Resultados da versão inicial (SF0.1)}
 
-Os resultados da primeira rodada, executada na versão \texttt{SF0.1}, estão sintetizados nas tabelas a seguir. A organização adota o mesmo conjunto de indicadores previsto para as próximas versões, de modo a manter a comparabilidade entre as execuções.
+Os resultados da primeira rodada, executada na versão \texttt{SF0.1}, estão sintetizados nas tabelas a seguir. Essa rodada funcionou como uma validação inicial do protocolo experimental, operando sobre uma amostra muito reduzida de dados.
 
 \begin{table}[H]
 \centering
@@ -434,47 +434,104 @@ LTR robusto & 0,9211 & 0,8842 & 0,9436 & 206,70 & N/D \\
 \end{tabular}
 \end{table}
 
+Para interpretar os resultados, convém explicitar o significado dos valores apresentados. Nas métricas de ranqueamento, o valor 0,0000 indica que, nas 5 consultas válidas do conjunto de teste, nenhum item efetivamente acessado pelo usuário após o item de referência apareceu entre os 10 primeiros recomendados. Em outras palavras, os experimentos foram executados normalmente, mas, nesta rodada inicial, não houve acertos no topo da lista capazes de elevar NDCG@10, MRR@10 e Recall@10 acima de zero. A latência p95, por sua vez, corresponde ao percentil 95 do tempo de inferência, em milissegundos, necessário para gerar a recomendação; portanto, valores menores indicam respostas mais rápidas na maior parte das consultas.
 
-Para interpretar as Tabelas \ref{tab:resultados_sf01_ranking} e \ref{tab:resultados_sf01_complementares}, convém explicitar o significado dos valores apresentados. Nas métricas de ranqueamento, o valor 0,0000 indica que, nas 5 consultas válidas do conjunto de teste, nenhum item efetivamente acessado pelo usuário após o item de referência apareceu entre os 10 primeiros recomendados. Em outras palavras, os experimentos foram executados normalmente, mas, nesta rodada inicial, não houve acertos no topo da lista capazes de elevar NDCG@10, MRR@10 e Recall@10 acima de zero. A latência p95, por sua vez, corresponde ao percentil 95 do tempo de inferência, em milissegundos, necessário para gerar a recomendação; portanto, valores menores indicam respostas mais rápidas na maior parte das consultas.
-
-Nos indicadores complementares, a cobertura expressa a fração do catálogo total que apareceu ao menos uma vez nas recomendações ao longo da avaliação. Assim, cobertura 0,9737 significa que aproximadamente 97,37\% do catálogo foi exposto pelo modelo em algum momento, enquanto 0,9211 corresponde a cerca de 92,11\%. A diversidade, medida numa escala de 0 a 1, representa o grau médio de diferença entre os conjuntos de \textit{tags} dos itens dentro de uma mesma lista; quanto mais próximo de 1, maior a variedade temática interna. A novidade também é expressa em escala crescente e é calculada por popularidade inversa, de modo que valores mais altos indicam recomendação de itens menos frequentes e, portanto, menos óbvios.
+Nos indicadores complementares, a cobertura expressa a fração do catálogo total que apareceu ao menos uma vez nas recomendações ao longo da avaliação. Assim, cobertura 0,9737 significa que aproximadamente 97,37\% do catálogo foi exposto pelo modelo em algum momento. A diversidade, medida numa escala de 0 a 1, representa o grau médio de diferença entre os conjuntos de \textit{tags} dos itens dentro de uma mesma lista; quanto mais próximo de 1, maior a variedade temática interna. A novidade também é expressa em escala crescente e é calculada por popularidade inversa, de modo que valores mais altos indicam recomendação de itens menos frequentes e, portanto, menos óbvios.
 
 A recência média recomendada, diferentemente, não é uma taxa entre 0 e 1. Ela é calculada como a distância temporal média, em dias, entre a data de criação do item recomendado e o instante do item de referência usado na consulta em modo \textit{offline}. Desse modo, valores como 141,38, 179,92 ou 206,70 dias indicam que, em média, os conteúdos sugeridos estavam separados do item de referência por vários meses, o que sinaliza baixa proximidade temporal nesta rodada inicial.
 
 \noindent\textit{Nota:} A avaliação manual da rodada SF0.1 foi considerada inconclusiva e, por isso, aparece como N/D na Tabela \ref{tab:resultados_sf01_complementares}.
 
-À luz dessas definições, o modelo \textit{Baseline} padrão foi destacado formalmente como melhor configuração da rodada SF0.1. Ainda assim, esse resultado não deve ser lido como superioridade inequívoca, porque houve empate completo entre os cinco modelos nas métricas centrais de ranqueamento: NDCG@10, MRR@10 e Recall@10 permaneceram em 0,0000 para todas as configurações avaliadas. Com apenas 5 consultas válidas no conjunto de teste, a rodada inicial funciona mais como validação do protocolo experimental do que como evidência conclusiva de desempenho comparado.
+À luz dessas definições, o modelo \textit{Baseline} padrão foi destacado formalmente como melhor configuração da rodada SF0.1. Ainda assim, esse resultado não deve ser lido como superioridade inequívoca, porque houve empate completo entre os cinco modelos nas métricas centrais de ranqueamento: NDCG@10, MRR@10 e Recall@10 permaneceram em 0,0000 para todas as configurações avaliadas. Com apenas 5 consultas válidas no conjunto de teste, a rodada inicial funcionou mais como validação do protocolo experimental do que como evidência conclusiva de desempenho comparado.
 
-Quando se observam os indicadores complementares, o \textit{Baseline} padrão se destaca pela maior cobertura e pela maior novidade, o que sugere maior espalhamento do catálogo e menor concentração em itens muito frequentes. O \textit{Baseline} otimizado apresentou a menor latência p95 e a menor recência média, indicando respostas um pouco mais rápidas e recomendações temporalmente mais próximas do item de referência. As três variantes LTR exibiram diversidade ligeiramente superior, mas sem converter essa diferença em ganho nas métricas principais de ranqueamento.
+\subsection{Resultados da versão intermediária (SF3)}
 
-As avaliações auxiliares também ajudam a qualificar a leitura da rodada. Nos dois modelos híbridos, o experimento específico de popularidade, executado no conjunto de validação, mostrou redução leve do NDCG@10 quando o peso de popularidade 0,1 foi aplicado: o \textit{Baseline} padrão passou de 0,1128 para 0,1071, e o \textit{Baseline} otimizado passou de 0,1981 para 0,1950. Esse resultado sugere que, nesta versão SF0.1, a popularidade não contribuiu para melhora da ordenação. Além disso, nas três variantes LTR, a melhor iteração registrada foi a primeira, o que sugere que o volume de dados da rodada inicial ainda foi insuficiente para produzir diferenciação robusta entre as configurações de aprendizado para ranqueamento.
-
-
-\subsection{Espaço para comparação entre versões}
-
-A ampliação progressiva da base, passando da versão SF0.1 para versões maiores, permitirá observar se o comportamento das métricas se mantém, melhora ou se deteriora à medida que o volume de dados aumenta. A Tabela \ref{tab:comparacao_snapshots_tcc} foi preparada para registrar esse acompanhamento entre rodadas.
+Os resultados da rodada intermediária, executada na versão \texttt{SF3}, estão sintetizados nas tabelas a seguir. O aumento do volume de dados em relação à versão inicial gerou um conjunto de teste com 367 consultas válidas, permitindo uma avaliação mais robusta do comportamento dos algoritmos.
 
 \begin{table}[H]
 \centering
-\caption{Comparação prevista entre rodadas com diferentes versões}
+\caption{Resultados de ranqueamento da rodada intermediária na versão \texttt{SF3}}
+\label{tab:resultados_sf3_ranking}
+\small
+\begin{tabular}{|l|r|r|r|r|r|}
+\hline
+\textbf{Modelo} & \textbf{Consultas válidas} & \textbf{NDCG@10} & \textbf{MRR@10} & \textbf{Recall@10} & \textbf{Latência p95 (ms)} \\
+\hline
+\textit{Baseline} padrão & 367 & 0,0000 & 0,0000 & 0,0000 & 4,2467 \\
+\hline
+\textit{Baseline} otimizado & 367 & 0,0009 & 0,0003 & 0,0027 & 4,3098 \\
+\hline
+LTR \textit{core} & 367 & 0,0000 & 0,0000 & 0,0000 & 16,2811 \\
+\hline
+LTR contextual & 367 & 0,0000 & 0,0000 & 0,0000 & 14,5240 \\
+\hline
+LTR robusto & 367 & 0,0000 & 0,0000 & 0,0000 & 14,6955 \\
+\hline
+\end{tabular}
+\end{table}
+
+\begin{table}[H]
+\centering
+\caption{Indicadores complementares da rodada intermediária na versão \texttt{SF3}}
+\label{tab:resultados_sf3_complementares}
+\small
+\begin{tabular}{|l|r|r|r|r|p{1.5cm}|}
+\hline
+\textbf{Modelo} & \textbf{Cobertura} & \textbf{Diversidade} & \textbf{Novidade} & \textbf{Recência média (dias)} & \textbf{Avaliação manual} \\
+\hline
+\textit{Baseline} padrão & 0,3396 & 0,2607 & 0,9478 & 24,90 & N/D \\
+\hline
+\textit{Baseline} otimizado & 0,6471 & 0,6136 & 0,9323 & 3,18 & N/D \\
+\hline
+LTR \textit{core} & 0,1678 & 0,8825 & 1,0000 & 399,96 & N/D \\
+\hline
+LTR contextual & 0,1718 & 0,8689 & 1,0000 & 470,43 & N/D \\
+\hline
+LTR robusto & 0,1778 & 0,8323 & 1,0000 & 434,70 & N/D \\
+\hline
+\end{tabular}
+\end{table}
+
+
+Para interpretar as Tabelas \ref{tab:resultados_sf3_ranking} e \ref{tab:resultados_sf3_complementares}, convém explicitar o significado dos valores apresentados. Nas métricas de ranqueamento, o modelo \textit{Baseline} otimizado foi o único a pontuar no top 10 (NDCG@10 de 0,0009), indicando que, entre as 367 consultas válidas, ele conseguiu recuperar itens efetivamente acessados pelo usuário nas primeiras posições. Os demais modelos permaneceram zerados no top 10, embora o \textit{Baseline} padrão tenha pontuado no top 20 (NDCG@20 de 0,0007, conforme registros internos do experimento). Em termos de latência, os modelos híbridos mantiveram respostas muito rápidas (em torno de 4 ms), enquanto as variantes LTR exigiram mais tempo de processamento (cerca de 14 a 16 ms), devido à complexidade da inferência baseada em árvores.
+
+Nos indicadores complementares, o \textit{Baseline} otimizado atingiu uma cobertura de 64,71\%, o dobro do \textit{Baseline} padrão (33,96\%) e muito superior aos modelos LTR (em torno de 17\%). Os modelos LTR geraram listas altamente diversas (acima de 0,83), mas falharam em precisão. Destaca-se também o comportamento da recência: o \textit{Baseline} otimizado teve um desempenho excepcional, recomendando itens com apenas 3,18 dias de distância média do contexto da consulta, enquanto os modelos LTR sugeriram conteúdos com mais de um ano de distância (399 a 470 dias). Esse distanciamento temporal explica, em grande parte, o baixo desempenho do aprendizado para ranqueamento nesta rodada, uma vez que a atualidade é um fator crucial na predição de engajamento em redes sociais.
+
+\noindent\textit{Nota:} A avaliação manual da rodada SF3 foi considerada inconclusiva e, por isso, aparece como N/D na Tabela \ref{tab:resultados_sf3_complementares}.
+
+À luz dessas definições, o modelo \textit{Baseline} otimizado foi destacado formalmente como melhor configuração da rodada SF3. O aumento de dados (de 5 para 367 consultas) tirou os modelos da inércia absoluta observada na versão SF0.1, provando o valor da otimização fina de pesos no conjunto de validação. Contudo, os valores absolutos de NDCG@10 (0,0009) ainda são muito baixos. Isso evidencia a extrema dificuldade de prever interações futuras exatas em um domínio altamente esparso e temporalmente disperso como o da rede social simulada.
+
+Os modelos da família LTR sofreram com a esparsidade dos dados e com a dificuldade de aprender a importância da recência, gerando recomendações muito antigas e diversas, mas pouco precisas. A expectativa é que, com a execução da versão completa da base (SF30), o volume massivo de interações permita que o \textit{LightGBMRanker} encontre padrões mais consistentes e consiga superar a heurística manual do modelo híbrido.
+
+\subsection{Análise comparativa entre versões}
+
+A ampliação progressiva da base, passando da versão SF0.1 para a SF3, permitiu observar as primeiras mudanças no comportamento das métricas à medida que o volume de dados aumenta. A Tabela \ref{tab:comparacao_snapshots_tcc} registra esse acompanhamento evolutivo.
+
+\begin{table}[H]
+\centering
+\caption{Comparação evolutiva entre rodadas com diferentes versões}
 \label{tab:comparacao_snapshots_tcc}
 \small
-\begin{tabular}{|l|l|r|r|r|p{2cm}|}
+\begin{tabular}{|l|l|r|r|r|p{3.5cm}|}
 \hline
 \textbf{Rodada} & \textbf{Versão} & \textbf{Modelo destacado} & \textbf{NDCG@10} & \textbf{Cobertura} & \textbf{Observação} \\
 \hline
-Inicial & \texttt{SF0.1} & \textit{Baseline} padrão & 0,0000 & 0,9737 & Empate em NDCG@10 entre todos os modelos; amostra de 5 consultas válidas. \\
+Inicial & \texttt{SF0.1} & \textit{Baseline} padrão & 0,0000 & 0,9737 & Empate em zero; amostra de apenas 5 consultas válidas. \\
 \hline
-Intermediária & \texttt{SF1} & \textit{a preencher} & \textit{a preencher} & \textit{a preencher} & \textit{a preencher} \\
+Intermediária & \texttt{SF3} & \textit{Baseline} otimizado & 0,0009 & 0,6471 & Aumento para 367 consultas; Baseline otimizado sai da inércia. LTR sofre com esparsidade. \\
 \hline
 Final & \texttt{SF30} & \textit{a preencher} & \textit{a preencher} & \textit{a preencher} & \textit{a preencher} \\
 \hline
 \end{tabular}
 \end{table}
 
-\textit{[Nota para a versão final: Inserir aqui a discussão sobre o comportamento das métricas quando a versão da base aumentar, destacando ganhos, perdas e eventuais mudanças no modelo de melhor desempenho.]}
+A transição da versão SF0.1 para a SF3 revelou que o aumento de dados é fundamental para retirar os modelos da inércia absoluta (NDCG zerado). Com 367 consultas válidas, o \textit{Baseline} otimizado conseguiu demonstrar a eficácia do ajuste fino de pesos. No entanto, os valores absolutos de NDCG@10 (0,0009) ainda permanecem muito baixos. Essa dificuldade inerente reflete a natureza do domínio: prever interações futuras exatas em uma rede social simulada é uma tarefa de alta esparsidade e dispersão temporal.
 
-\textit{[Nota para a versão final: Inserir aqui a identificação do melhor modelo final segundo NDCG@10, seus parâmetros principais e a comparação quantitativa entre a família híbrida e as variantes de aprendizado para ranqueamento (\textit{Learning to Rank}).]}
+Além disso, a comparação evidencia o desafio enfrentado pelos modelos de aprendizado para ranqueamento (\textit{Learning to Rank}). Na rodada SF3, as variantes LTR apresentaram latência significativamente maior e não conseguiram superar a precisão ou a recência da heurística híbrida. Isso sugere que a quantidade de dados da SF3 ainda não foi suficiente para que as árvores de decisão aprendessem relações complexas de forma generalizável. 
+
+A expectativa para a rodada final, com a versão completa da base (SF30), é que o volume massivo de interações permita que o \textit{LightGBMRanker} encontre padrões consistentes, reduzindo a distância temporal de suas recomendações e, potencialmente, superando o modelo híbrido de referência.
+
+\textit{[Nota para a versão final: Inserir aqui a identificação do melhor modelo final segundo NDCG@10 na base SF30, seus parâmetros principais e a comparação quantitativa definitiva entre a família híbrida e as variantes LTR.]}
 
 Como limitação atual do protocolo, a versão personalizada da trilha LTR, baseada explicitamente na identidade do usuário durante a ordenação, ainda não integra estas rodadas preliminares. Assim, a comparação inicial permanece concentrada no modelo híbrido de referência e nas variantes da trilha LTR v1.
 
