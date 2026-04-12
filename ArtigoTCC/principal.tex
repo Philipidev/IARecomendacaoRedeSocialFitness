@@ -5,6 +5,7 @@
 \usepackage{tikz}
 \usepackage{float}
 \usepackage{amssymb} % Para \checkmark
+\usepackage{amsmath} % Para \text em modo matemático
 
 \usetikzlibrary{positioning,arrows.meta,shadows.blur,fit} 
 
@@ -72,7 +73,8 @@
 
 \begin{abstract}
 \noindent
-A prática insuficiente de atividade física permanece um desafio relevante de saúde pública, exigindo intervenções capazes de engajar a população. Em ambientes digitais, o excesso de informação dificulta a descoberta de conteúdos adequados ao perfil e momento de cada usuário, tornando os sistemas de recomendação ferramentas essenciais para a personalização. Este trabalho apresenta o desenvolvimento e a avaliação de um sistema de recomendação voltado à personalização de conteúdo sobre atividade física em uma rede social. A proposta utiliza como base experimental a base de dados LDBC SNB, da qual são extraídos posts, interações, interesses declarados e relações sociais associados a esse domínio. Sobre esses dados, foi estruturado um fluxo reproduzível de preparação, separação em treino, validação e teste, treinamento e avaliação. O sistema de recomendação combina sinais de similaridade de conteúdo, coocorrência de \textit{tags}, recência, popularidade e influência do grafo social em um modelo híbrido de referência explicável, além de incluir uma trilha de aprendizado para ranqueamento (\textit{Learning to Rank}) com \textit{LightGBMRanker} para comparação entre modelos. A avaliação é organizada por meio de uma comparação entre múltiplos modelos, considerando métricas de ranqueamento e indicadores complementares de cobertura, diversidade, novidade e latência. Como principal contribuição, o trabalho consolida uma arquitetura experimental rastreável para o estudo da recomendação de conteúdo \textit{fitness} em contexto social, permitindo comparar abordagens de ranqueamento sob um mesmo protocolo de dados e avaliação.
+A prática insuficiente de atividade física permanece um desafio relevante de saúde pública, exigindo intervenções capazes de engajar a população. Em ambientes digitais, o excesso de informação dificulta a descoberta de conteúdos adequados ao perfil e momento de cada usuário, tornando os sistemas de recomendação ferramentas essenciais para a personalização. Diante disso, este trabalho apresenta o desenvolvimento e a avaliação de um sistema de recomendação voltado à personalização de conteúdo sobre atividade física em uma rede social. A proposta utiliza como base experimental a base de dados LDBC SNB, da qual são extraídos posts, interações, interesses declarados e relações sociais associados a esse domínio. Sobre esses dados, foi estruturado um fluxo reproduzível de preparação, separação em treino, validação e teste, treinamento e avaliação. O sistema de recomendação combina sinais de similaridade de conteúdo, coocorrência de \textit{tags}, recência, popularidade e influência do grafo social em um modelo híbrido de referência explicável, além de incluir uma trilha de aprendizado para ranqueamento (\textit{Learning to Rank}) com \textit{LightGBMRanker} para comparação entre modelos. \textcolor{green}{Acho que essa parte pode ser tirada: A avaliação é organizada por meio de uma comparação entre múltiplos modelos, considerando métricas de ranqueamento e indicadores complementares de cobertura, diversidade, novidade e latência. Como principal contribuição, o trabalho consolida uma arquitetura experimental rastreável para o estudo da recomendação de conteúdo \textit{fitness} em contexto social, permitindo comparar abordagens de ranqueamento sob um mesmo protocolo de dados e avaliação.}
+\textcolor{blue}{Ao final, lembrar de colocar um resumo (2 linhas) dos resultados aqui.}
 \\\textbf{\keyword{Palavras-chave: }}Sistemas de Recomendação, Aprendizado para Ranqueamento, Grafo Social, Atividade Física
 \end{abstract}
 
@@ -81,7 +83,7 @@ A prática insuficiente de atividade física permanece um desafio relevante de s
 \selectlanguage{english}
 \begin{abstract}
 \noindent
-This work presents the development and evaluation of a recommender system aimed at personalizing fitness-related content in a social network. The proposal uses the LDBC SNB dataset as its experimental basis, from which posts, interactions, declared interests, and social relationships associated with physical activity are extracted. On top of these data, a reproducible pipeline was structured for data preparation, train-validation-test splitting, training, and evaluation. The recommender combines content similarity, tag co-occurrence, recency, popularity, and social graph influence in an explainable hybrid baseline, while also including a Learning to Rank track with LightGBMRanker for model comparison. Evaluation is organized through a multi-model benchmark that considers ranking metrics as well as complementary indicators of coverage, diversity, novelty, and latency. As its main contribution, the work consolidates a traceable experimental architecture for studying fitness content recommendation in a social context, allowing ranking approaches to be compared under a common data and evaluation protocol.
+This work presents the development and evaluation of a recommender system aimed at personalizing fitness-related content in a social network. The proposal uses the LDBC SNB dataset as its experimental basis, from which posts, interactions, declared interests, and social relationships associated with physical activity are extracted. On top of these data, a reproducible pipeline was structured for data preparation, train-validation-test splitting, training, and evaluation. The recommender combines content similarity, tag co-occurrence, recency, popularity, and social graph influence in an explainable hybrid baseline, while also including a Learning to Rank track with LightGBMRanker for model comparison.
 \\\textbf{\keyword{Keywords: }}Recommendation Systems, Learning to Rank, Social Graph, Physical Activity
 \end{abstract}
 
@@ -96,7 +98,7 @@ This work presents the development and evaluation of a recommender system aimed 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
 \section{Introdução}
-A prática insuficiente de atividade física permanece um desafio relevante de saúde pública no Brasil, contribuindo para o aumento de doenças crônicas não transmissíveis. Dados do \cite{Vigitel2023} indicam que os níveis de atividade física observados nas capitais brasileiras ainda demandam políticas e estratégias capazes de reduzir o sedentarismo e ampliar a adoção de rotinas ativas. Em paralelo, a Organização Mundial da Saúde recomenda, para adultos, entre 150 e 300 minutos semanais de atividade aeróbica moderada, parâmetro que ainda não é alcançado por parcela expressiva da população \cite{WHO2020}.
+A prática insuficiente de atividade física permanece um desafio relevante de saúde pública no Brasil, contribuindo para o aumento de doenças crônicas não transmissíveis. Dados do \citeonline{Vigitel2023} indicam que os níveis de atividade física observados nas capitais brasileiras ainda demandam políticas e estratégias capazes de reduzir o sedentarismo e ampliar a adoção de rotinas ativas. Em paralelo, a Organização Mundial da Saúde recomenda, para adultos, entre 150 e 300 minutos semanais de atividade aeróbica moderada, parâmetro que ainda não é alcançado por parcela expressiva da população \cite{WHO2020}.
 
 Nesse cenário, intervenções digitais voltadas ao acompanhamento e ao estímulo da atividade física vêm recebendo atenção crescente, sobretudo quando buscam adaptar conteúdos ao contexto do usuário \cite{Agans2025PARecommender,Venka2022CARS}. Contudo, a simples disponibilização de conteúdos em plataformas digitais não garante que cada pessoa receba informações compatíveis com seus interesses, seu momento de uso e sua realidade social.
 
@@ -104,7 +106,9 @@ Em ambientes com grande volume de itens e interações, essa adaptação depende
 
 Em serviços digitais, esses sistemas exercem papel estratégico na organização da informação \cite{GomezUribe2016Netflix}. No domínio da atividade física, sua utilidade tende a crescer quando também consideram sinais sociais, uma vez que interações entre pares podem influenciar comportamento e engajamento \cite{Franken2023}.
 
-Diante desse problema, este trabalho propõe o desenvolvimento e a avaliação de um sistema de recomendação para uma rede social voltada à atividade física. O estudo utiliza dados extraídos do LDBC SNB \cite{Angles2020LDBCSNB} e organiza um fluxo com as etapas de coleta, preparação, treinamento, validação e avaliação dos modelos. Como contribuição técnica, o sistema atua como o motor de personalização do aplicativo FitConnect, que serve como ambiente de interação e estudo de caso para a coleta de sinais. Desse modo, o problema investigado neste trabalho não se limita à oferta de conteúdo, mas à construção de um processo de ordenação que articule conteúdo, contexto temporal e relações sociais.
+Diante desse problema, este trabalho propõe o desenvolvimento e a avaliação de um sistema de recomendação para uma rede social voltada à atividade física. O estudo utiliza dados extraídos do LDBC SNB \cite{Angles2020LDBCSNB} e organiza um fluxo com as etapas de coleta, preparação, treinamento, validação e avaliação dos modelos. \textcolor{blue}{Segue uma sugestão para trocar pela frase anterior (deixei ela comentada): Como contribuição técnica, foi desenvolvido o aplicativo FitConnect, que serve como ambiente de interação e estudo de caso para a coleta de sinais e experimentações.} Desse modo, o problema investigado neste trabalho não se limita à oferta de conteúdo, mas à construção de um processo de ordenação que articule conteúdo, contexto temporal e relações sociais.
+
+% Como contribuição técnica, o sistema atua como o motor de personalização do aplicativo FitConnect, que serve como ambiente de interação e estudo de caso para a coleta de sinais. Desse modo, o problema investigado neste trabalho não se limita à oferta de conteúdo, mas à construção de um processo de ordenação que articule conteúdo, contexto temporal e relações sociais.
 
 A solução investigada é construída em etapas. Primeiramente, o sistema combina similaridade de conteúdo, coocorrência de marcadores temáticos (\textit{tags}), recência, popularidade e informação do grafo social em um modelo híbrido de referência, onde cada sinal possui um peso interpretável. Em complemento, o trabalho incorpora uma trilha de aprendizado para ranqueamento (\textit{Learning to Rank}), permitindo que a importância de cada um desses sinais seja aprendida automaticamente a partir dos dados. A contribuição central do trabalho consiste em estruturar e comparar, em um mesmo ambiente experimental, essas diferentes abordagens de recomendação para apoiar a personalização de conteúdos sobre atividade física.
 
@@ -116,31 +120,48 @@ O restante do trabalho está organizado da seguinte forma: a Seção 2 apresenta
 
 \section{Fundamentação Teórica}
 
-Esta seção apresenta os conceitos centrais que sustentam a proposta desenvolvida no trabalho. O foco recai sobre sistemas de recomendação, modelos híbridos, sinais de ranqueamento, aprendizado para ranqueamento e métricas de avaliação, de modo a explicar os principais termos introduzidos nas seções anteriores.
+Esta seção apresenta os conceitos centrais que sustentam a proposta desenvolvida no trabalho. 
+
+\textcolor{green}{Eu tiraria essa parte: O foco recai sobre sistemas de recomendação, modelos híbridos, sinais de ranqueamento, aprendizado para ranqueamento e métricas de avaliação, de modo a explicar os principais termos introduzidos nas seções anteriores.}
 
 \subsection{Inteligência Artificial e Sistemas de Recomendação}
 
-No contexto deste trabalho, a Inteligência Artificial é compreendida como o conjunto de métodos computacionais utilizados para apoiar decisões automáticas a partir de dados. Entre essas aplicações, os sistemas de recomendação ocupam papel relevante por permitirem selecionar e ordenar conteúdos potencialmente mais úteis para cada usuário em ambientes com grande volume de informação \cite{10.1145/3285029,GomezUribe2016Netflix}.
+% No contexto deste trabalho, 
+
+A Inteligência Artificial é compreendida como o conjunto de métodos computacionais utilizados para apoiar decisões automáticas a partir de dados. Entre essas aplicações, os sistemas de recomendação ocupam papel relevante por permitirem selecionar e ordenar conteúdos potencialmente mais úteis para cada usuário em ambientes com grande volume de informação \cite{10.1145/3285029,GomezUribe2016Netflix}.
 
 Em termos gerais, um sistema de recomendação busca estimar a relevância de itens, como filmes, músicas, produtos ou publicações, com base em sinais observáveis do contexto, do conteúdo e do comportamento dos usuários. No cenário da atividade física, revisões recentes indicam que esses sistemas podem contribuir para tornar intervenções digitais mais aderentes ao perfil e ao momento de uso de cada pessoa \cite{Venka2022CARS,Agans2025PARecommender}.
 
 Para atingir esse objetivo, diferentes estratégias de filtragem podem ser empregadas. A filtragem baseada em conteúdo parte das características do próprio item recomendado. Em vez de depender exclusivamente do comportamento coletivo dos usuários, ela compara descritores dos itens com o perfil de interesse do usuário ou com a descrição do item de referência. Por outro lado, a filtragem colaborativa procura identificar padrões de interesse a partir do comportamento agregado de diferentes usuários. Sua ideia central é que interações passadas podem revelar relações úteis entre usuários, itens ou grupos de itens, permitindo inferir preferências prováveis mesmo quando os conteúdos não são idênticos \cite{10.1145/3285029}.
 
-Quando essas abordagens são utilizadas em conjunto, formam-se os modelos híbridos. Esses modelos combinam diferentes fontes de evidência em um mesmo processo de recomendação. Essa estratégia é relevante porque permite articular características do conteúdo, padrões coletivos de interação e informações contextuais em uma única função de ranqueamento \cite{Venka2022CARS}. Uma variação dessa abordagem é o modelo híbrido de referência explicável, que designa uma arquitetura em que cada sinal possui significado claro e contribuição interpretável no cálculo do escore final.
+Quando essas abordagens são utilizadas em conjunto, formam-se os modelos híbridos. Esses modelos combinam diferentes fontes de evidência em um mesmo processo de recomendação. Essa estratégia é relevante porque permite articular características do conteúdo, padrões coletivos de interação e informações contextuais em uma única função de ranqueamento \cite{Venka2022CARS}. Uma variação dessa abordagem é o modelo híbrido de referência explicável, que designa uma arquitetura em que cada sinal possui significado claro e contribuição interpretável no cálculo do \textit{score} final.
+
+\textcolor{green}{Essa palavra "escore" existe? Acho melhor trocar para score em itálico ou pontuação, não?}
 
 \subsection{Sinais de ranqueamento}
 
-Como a recomendação não depende de um único critério de relevância, múltiplos sinais podem ser utilizados para ordenar os candidatos. A combinação desses sinais forma a base de modelos híbridos e de algoritmos de aprendizado.
+\textcolor{green}{Acredito que seria importante trazer umas 2 ou 3 referências (citações) a mais nessa subseção ao longo dos parágrafos. Existem muitas afirmações que estão sem citações.}
 
-Similaridade de conteúdo é o grau de proximidade temática entre dois itens. Quando dois \textit{posts} compartilham marcadores semânticos semelhantes, entende-se que tratam de assuntos próximos, o que aumenta a chance de um deles ser relevante para quem demonstrou interesse no outro.
+Como a recomendação não depende de um único critério de relevância, múltiplos sinais podem ser utilizados para ordenar os candidatos. A combinação desses sinais forma a base de modelos híbridos e de algoritmos de aprendizado \cite{10.1145/3285029}.
+
+Similaridade de conteúdo é o grau de proximidade temática entre dois itens. Quando dois \textit{posts} compartilham marcadores semânticos semelhantes, entende-se que tratam de assuntos próximos, o que aumenta a chance de um deles ser relevante para quem demonstrou interesse no outro \cite{Lops2011CB}.
 
 Coocorrência de \textit{tags} corresponde à frequência com que determinados marcadores aparecem juntos em um mesmo conjunto de dados. Quando duas \textit{tags} surgem repetidamente associadas nas publicações, essa relação pode ser explorada como indício de proximidade temática ou comportamental. Assim, a coocorrência amplia a recomendação para além da coincidência exata de marcadores, permitindo recuperar conteúdos relacionados.
 
-Recência é o sinal temporal que favorece itens mais recentes ou mais próximos do momento de referência da consulta. Em plataformas dinâmicas, a relevância de um conteúdo não depende apenas do tema, mas também de sua posição no tempo. Por isso, modelos de recomendação frequentemente incorporam mecanismos de decaimento temporal para reduzir o peso de conteúdos muito antigos em relação ao contexto atual.
+Recência é o sinal temporal que favorece itens mais recentes ou mais próximos do momento de referência da consulta. Em plataformas dinâmicas, a relevância de um conteúdo não depende apenas do tema, mas também de sua posição no tempo. Por isso, modelos de recomendação frequentemente incorporam mecanismos de decaimento temporal para reduzir o peso de conteúdos muito antigos em relação ao contexto atual \cite{Koren2009Temporal}.
 
-Popularidade representa o interesse coletivo acumulado em torno de um item ou de um grupo de itens. Em termos práticos, ela pode ser estimada por volume de interações, frequência de acesso ou intensidade de engajamento. Esse sinal funciona como evidência complementar de relevância, especialmente útil quando se deseja considerar o comportamento agregado da comunidade.
+Popularidade representa o interesse coletivo acumulado em torno de um item ou de um grupo de itens. Em termos práticos, ela pode ser estimada por volume de interações, frequência de acesso ou intensidade de engajamento. Esse sinal funciona como evidência complementar de relevância, especialmente útil quando se deseja considerar o comportamento agregado da comunidade \cite{Covington2016YouTube}.
 
 Por fim, a influência do grafo social é a representação das relações entre usuários na forma de nós e conexões. Quando esse tipo de estrutura é incorporado à recomendação, torna-se possível considerar não apenas o conteúdo consumido, mas também a posição social de quem interage com ele. Em redes sociais voltadas à atividade física, interações entre pares podem influenciar engajamento e comportamento, o que justifica o uso de sinais associados à estrutura social no processo de ranqueamento \cite{Franken2023}.
+
+Em um modelo híbrido de referência explicável, o \textit{score} final do item pode ser entendido como uma combinação ponderada desses componentes:
+
+\begin{equation}
+\label{eq:score_hibrido}
+score(i,q) = w_c \cdot s_{c} + w_o \cdot s_{o} + w_r \cdot s_{r} + w_s \cdot s_{s} + w_p \cdot s_{p}
+\end{equation}
+
+\noindent onde, $score(i,q)$ é a pontuação final de relevância do item $i$ para a consulta $q$; $w_c, w_o, w_r, w_s, w_p$ são os pesos atribuídos a cada sinal, cuja soma é igual a 1; $s_{c}$ é o \textit{score} de similaridade de conteúdo (cálculo de cosseno entre vetores de \textit{tags}); $s_{o}$ é o \textit{score} de coocorrência de \textit{tags}; $s_{r}$ é o \textit{score} de recência (decaimento temporal); $s_{s}$ é o \textit{score} de influência do grafo social; $s_{p}$ é o \textit{score} de popularidade histórica do item.
 
 \subsection{Aprendizado para ranqueamento}
 
@@ -150,11 +171,9 @@ Diferentemente de um modelo com pesos definidos manualmente, o \textit{Learning 
 
 O \textit{LightGBMRanker} é um algoritmo específico utilizado em tarefas de ranqueamento, baseado em árvores de decisão com aumento de gradiente (\textit{Gradient Boosting Decision Trees}). Ele é projetado para otimizar métricas de ordenação de forma eficiente, permitindo que a importância relativa de diversos atributos seja aprendida diretamente a partir dos dados de treinamento \cite{Ke2017LightGBM}.
 
-\subsection{Métricas de avaliação de ranqueamento}
+\textcolor{green}{Eu tiraria aqui o título da subseção. Acho que esse texto pode ser em sequência, sem a quebra do título, ou seja, sem abrir uma nova subseção. Além disso, eu juntaria esses dois próximos parágrafos em um único.}
 
-Em tarefas de ranqueamento, a avaliação precisa considerar não apenas se um item relevante foi recuperado, mas também a posição em que ele aparece na lista. Por essa razão, métricas de ordenação são particularmente importantes na análise de sistemas de recomendação.
-
-A \textit{Normalized Discounted Cumulative Gain} (\textit{NDCG}) permite avaliar se os itens mais relevantes estão concentrados nas primeiras posições da lista \cite{Jarvelin2002NDCG}. Ela atribui pesos maiores aos acertos no topo da lista e penaliza acertos em posições inferiores. Já a \textit{Mean Reciprocal Rank} (\textit{MRR}) enfatiza quão cedo surge o primeiro item relevante para cada consulta \cite{Craswell2009MRR}, sendo calculada pelo inverso da posição do primeiro acerto. Ambas as métricas são fundamentais para mensurar a eficácia de algoritmos de ranqueamento, especialmente em cenários onde a atenção do usuário é limitada aos primeiros resultados.
+Em tarefas de ranqueamento, a avaliação precisa considerar não apenas se um item relevante foi recuperado, mas também a posição em que ele aparece na lista. Por essa razão, métricas de ordenação são particularmente importantes na análise de sistemas de recomendação. A \textit{Normalized Discounted Cumulative Gain} (\textit{NDCG}) permite avaliar se os itens mais relevantes estão concentrados nas primeiras posições da lista \cite{Jarvelin2002NDCG}. Ela atribui pesos maiores aos acertos no topo da lista e penaliza acertos em posições inferiores. Já a \textit{Mean Reciprocal Rank} (\textit{MRR}) enfatiza quão cedo surge o primeiro item relevante para cada consulta \cite{Craswell2009MRR}, sendo calculada pelo inverso da posição do primeiro acerto. Ambas as métricas são fundamentais para mensurar a eficácia de algoritmos de ranqueamento, especialmente em cenários onde a atenção do usuário é limitada aos primeiros resultados.
 
 
 
@@ -179,7 +198,7 @@ Em conjunto, esses trabalhos mostram que a literatura já reconhece a importânc
 
 \section{Metodologia}
 
-Esta seção apresenta os materiais empregados no estudo e o método adotado para desenvolver, treinar e comparar os modelos de recomendação. O foco recai sobre o fluxo de dados e sobre as escolhas metodológicas associadas ao sistema de recomendação, que atua como o motor de personalização do aplicativo FitConnect.
+Esta seção apresenta os materiais empregados no estudo e o método adotado para desenvolver, treinar e comparar os modelos de recomendação. \textcolor{green}{Eu tiraria essa próxima frase (ainda acho ela artificial):} O foco recai sobre o fluxo de dados e sobre as escolhas metodológicas associadas ao sistema de recomendação, que atua como o motor de personalização do aplicativo FitConnect.
 
 
 \subsection{Materiais}
@@ -191,19 +210,21 @@ O ambiente computacional do projeto foi organizado principalmente em Python 3.11
 Como materiais intermediários do estudo, foram produzidos artefatos derivados da base inicial e os conjuntos de treino, validação e teste. Esses arquivos compõem a base efetiva sobre a qual os modelos são treinados e avaliados. Entre os principais artefatos, destacam-se:
 
 \begin{itemize}
-    \item[a)] \texttt{messages\_fitness.parquet}: Contém os metadados de todas as publicações e comentários filtrados para o domínio fitness, incluindo data de criação, tamanho do texto e \textit{tags} associadas.
-    \item[b)] \texttt{interactions\_fitness.parquet}: Registra as ações dos usuários sobre os conteúdos, como curtidas, criação de posts e respostas, essenciais para inferir preferências.
-    \item[c)] \texttt{tag\_cooccurrence.parquet}: Armazena a frequência com que pares de \textit{tags} aparecem juntos nas publicações, servindo de base para o cálculo de similaridade semântica.
-    \item[d)] \texttt{posts\_metadata.parquet}: Versão consolidada dos dados dos posts, preparada especificamente para a etapa de treinamento dos modelos.
-    \item[e)] \texttt{social\_scores.parquet}: Contém os escores de influência calculados a partir do grafo social, indicando o peso das interações da rede de contatos para cada post.
-    \item[f)] \texttt{user\_tag\_profile.parquet}: Representa o perfil de interesse de cada usuário, construído a partir de suas interações históricas com diferentes \textit{tags}.
+    \item[a)] \texttt{messages\_fitness.parquet}: contém os metadados de todas as publicações e comentários filtrados para o domínio fitness, incluindo data de criação, tamanho do texto e \textit{tags} associadas.
+    \item[b)] \texttt{interactions\_fitness.parquet}: registra as ações dos usuários sobre os conteúdos, como curtidas, criação de posts e respostas, essenciais para inferir preferências.
+    \item[c)] \texttt{tag\_cooccurrence.parquet}: armazena a frequência com que pares de \textit{tags} aparecem juntos nas publicações, servindo de base para o cálculo de similaridade semântica.
+    \item[d)] \texttt{posts\_metadata.parquet}: versão consolidada dos dados dos posts, preparada especificamente para a etapa de treinamento dos modelos.
+    \item[e)] \texttt{social\_scores.parquet}: contém os escores de influência calculados a partir do grafo social, indicando o peso das interações da rede de contatos para cada post.
+    \item[f)] \texttt{user\_tag\_profile.parquet}: representa o perfil de interesse de cada usuário, construído a partir de suas interações históricas com diferentes \textit{tags}.
 \end{itemize}
 
 Além disso, o processo experimental foi padronizado por um orquestrador e por configurações parametrizáveis. Esses componentes permitem controlar hiperparâmetros de treinamento, famílias de modelo, etapas de avaliação e diretórios de saída, garantindo a reprodutibilidade dos experimentos.
 
 \subsection{Método}
 
-O método desenvolvido foi organizado em cinco etapas principais: extração e filtragem do conteúdo, preparação dos dados, separação experimental, construção dos modelos de recomendação e rastreabilidade dos experimentos. A Figura \ref{fig:fluxograma_metodologia} ilustra o fluxo de dados desde a base bruta até a avaliação dos modelos.
+O método desenvolvido foi organizado em cinco etapas principais: Etapa 1: extração e filtragem do conteúdo; Etapa 2: preparação de dados; Etapa 3: separação experimental; Etapa 4: treinamento dos modelos; e Etapa 5: avaliação e rastreabilidade. A Figura \ref{fig:fluxograma_metodologia} ilustra o fluxo de dados desde a base bruta até a avaliação dos modelos.
+
+\textcolor{green}{Colocar o número da etapa, por exemplo: Etata 1: Extração e Filtragem Fitness. Aí no título da subseção, faz a mesma coisa. Fica mais fácil de achar qual é qual etapa.}
 
 \begin{figure}[H]
 \centering
@@ -217,11 +238,11 @@ O método desenvolvido foi organizado em cinco etapas principais: extração e f
 
 % Nodes
 \node[box, fill=gray!20] (ldbc) {Base Bruta\\(LDBC SNB)};
-\node[box, right=of ldbc] (extracao) {Extração e\\Filtragem Fitness};
-\node[box, right=of extracao] (preparacao) {Preparação\\de Dados};
-\node[box, below=of preparacao] (split) {Separação\\(Treino/Val/Teste)};
-\node[box, left=of split] (treinamento) {Treinamento\\dos Modelos};
-\node[box, left=of treinamento] (avaliacao) {Avaliação e\\Comparação};
+\node[box, right=of ldbc] (extracao) {Etapa 1: Extração e\\Filtragem Fitness};
+\node[box, right=of extracao] (preparacao) {Etapa 2: Preparação\\de Dados};
+\node[box, below=of preparacao] (split) {Etapa 3: Separação\\(Treino/Val/Teste)};
+\node[box, left=of split] (treinamento) {Etapa 4: Treinamento\\dos Modelos};
+\node[box, left=of treinamento] (avaliacao) {Etapa 5: Avaliação e\\Rastreabilidade};
 
 % Arrows
 \draw[arrow] (ldbc) -- (extracao);
@@ -234,11 +255,54 @@ O método desenvolvido foi organizado em cinco etapas principais: extração e f
 \small \\ Fonte: Elaborado pelos autores.
 \end{figure}
 
-\subsubsection{Extração e filtragem do conteúdo}
+\subsubsection{Etapa 1: Extração e filtragem do conteúdo}
 
-A primeira etapa consistiu em transformar uma base social genérica em um conjunto de dados orientado ao domínio da atividade física. Para isso, o arquivo compactado do \textit{LDBC SNB} foi extraído e seus arquivos \textit{CSV} foram processados. Como a base original contém dados sobre diversos temas não relacionados ao escopo do trabalho, o conteúdo associado à temática \textit{fitness} foi identificado por duas estratégias complementares: correspondência por classes de \textit{tags} (ex: "sports", "health", "fitness") e filtragem direta pelos nomes das próprias \textit{tags} (ex: "corrida", "academia", "gym"). Esse procedimento resultou em tabelas com mensagens, interações, interesses e relações sociais já restritas ao domínio estudado.
+\textcolor{green}{Nesse parágrao seguinte, tem termos em português (como academia) e inglês (como sports, health). Acho melhor padronizar tudo igual está na base.}
+
+A primeira etapa consistiu em transformar uma base social genérica em um conjunto de dados orientado ao domínio da atividade física. Para isso, o arquivo compactado do \textit{LDBC SNB} foi extraído e seus arquivos \textit{CSV} foram processados. Como a base original contém dados sobre diversos temas não relacionados ao escopo do trabalho, o conteúdo associado à temática \textit{fitness} foi identificado por duas estratégias complementares: correspondência por classes de \textit{tags} (ex: "sports", "health", "fitness") e filtragem direta pelos nomes das próprias \textit{tags} (ex: "running", "workout", "gym"). Esse procedimento resultou em tabelas com mensagens, interações, interesses e relações sociais já restritas ao domínio estudado.
 
 Para ilustrar o impacto dessa filtragem, a Tabela \ref{tab:estatisticas_extracao} apresenta o volume de dados extraídos da versão SF0.1 do \textit{LDBC SNB} após a aplicação das regras de domínio.
+
+Para tornar o processo mais claro, o Algoritmo \ref{alg:extracao} apresenta o pseudocódigo que resume a lógica de alto nível dessa etapa. O procedimento lê o \textit{dataset} bruto, filtra as \textit{tags} relevantes, identifica os \textit{posts} associados e, a partir deles, extrai apenas as interações e as conexões sociais pertinentes ao contexto.
+
+\begin{algorithm}[H]
+\caption{Extração e Filtragem de Conteúdo \textit{Fitness}}
+\label{alg:extracao}
+\textbf{Entrada:} Base bruta do LDBC SNB, Palavras-chave \textit{fitness} (ex: \texttt{running}, \texttt{gym})\\
+\textbf{Saída:} Tabelas de \textit{posts}, interações e grafo social filtrados\\
+\BlankLine
+$tags \gets$ \text{Ler tabela de Tags}\;
+$tags\_fitness \gets \emptyset$\;
+\For{cada $tag \in tags$}{
+    \If{$tag.nome$ contém alguma palavra-chave \textit{fitness}}{
+        $tags\_fitness \gets tags\_fitness \cup \{tag\}$\;
+    }
+}
+$posts \gets$ \text{Ler tabela de Posts e Comentários}\;
+$posts\_fitness \gets \emptyset$\;
+\For{cada $post \in posts$}{
+    \If{$post.tags \cap tags\_fitness \neq \emptyset$}{
+        $posts\_fitness \gets posts\_fitness \cup \{post\}$\;
+    }
+}
+$interacoes \gets$ \text{Ler tabela de Curtidas, Respostas e Criações}\;
+$interacoes\_fitness \gets \emptyset$\;
+$usuarios\_ativos \gets \emptyset$\;
+\For{cada $interacao \in interacoes$}{
+    \If{$interacao.post \in posts\_fitness$}{
+        $interacoes\_fitness \gets interacoes\_fitness \cup \{interacao\}$\;
+        $usuarios\_ativos \gets usuarios\_ativos \cup \{interacao.usuario\}$\;
+    }
+}
+$grafo\_bruto \gets$ \text{Ler tabela de Relações Sociais (quem conhece quem)}\;
+$grafo\_fitness \gets \emptyset$\;
+\For{cada $aresta(u, v) \in grafo\_bruto$}{
+    \If{$u \in usuarios\_ativos$ \textbf{ou} $v \in usuarios\_ativos$}{
+        $grafo\_fitness \gets grafo\_fitness \cup \{aresta(u, v)\}$\;
+    }
+}
+\Return{$posts\_fitness$, $interacoes\_fitness$, $grafo\_fitness$}\;
+\end{algorithm}
 
 \begin{table}[H]
 \centering
@@ -259,45 +323,80 @@ Pares de coocorrência de \textit{tags} & 1.157 \\
 \end{tabular}
 \end{table}
 
-\subsubsection{Preparação dos dados e separação experimental}
+\subsubsection{Etapa 2: Preparação dos dados}
 
-Na segunda etapa, os arquivos extraídos foram convertidos em artefatos próprios para treinamento. Entre eles, destacam-se os metadados semânticos dos posts, a contagem de interações por \textit{tag}, os escores de influência social por post e os perfis usuário-\textit{tag}. Em seguida, os dados foram divididos em treino, validação e teste, nas proporções de 70\%, 15\% e 15\%, respectivamente. 
+Na segunda etapa, os arquivos extraídos foram convertidos em artefatos próprios para treinamento. Entre eles, destacam-se os metadados semânticos dos posts, a contagem de interações por \textit{tag}, os escores de influência social por post e os perfis usuário-\textit{tag}.
 
-Essa proporção foi escolhida por seguir práticas amplamente adotadas na literatura de aprendizado de máquina, nas quais os dados são divididos em conjuntos de treinamento, validação e teste (GOODFELLOW; BENGIO; COURVILLE, 2016; HASTIE; TIBSHIRANI; FRIEDMAN, 2009). Dessa forma, utiliza-se a maior parte dos dados para o treinamento (70%), enquanto subconjuntos menores são reservados para o ajuste de hiperparâmetros (15% em validação) e para a avaliação final e imparcial do desempenho do modelo (15% em teste).
+\subsubsection{Etapa 3: Separação experimental}
 
-Além disso, essa divisão estática foi escolhida em detrimento da Validação Cruzada (\textit{Cross Validation}) para evitar o vazamento de dados (\textit{data leakage}). No contexto deste sistema, atributos complexos como a coocorrência de \textit{tags} e os escores de influência do grafo social precisam ser recalculados \textbf{exclusivamente} com os dados do conjunto de treino. Se a Validação Cruzada fosse aplicada, além do custo computacional proibitivo de reconstruir e recalcular o grafo social a cada \textit{fold}, haveria o risco de que interações futuras (do conjunto de teste) influenciassem os pesos aprendidos no treinamento, comprometendo a validade da avaliação.
+Na terceira etapa, os dados foram divididos em treino, validação e teste, nas proporções de 70\%, 15\% e 15\%, respectivamente. 
 
-\subsubsection{Modelo híbrido de referência (\textit{Baseline})}
+Essa proporção foi escolhida por seguir práticas amplamente adotadas na literatura de aprendizado de máquina, nas quais os dados são divididos em conjuntos de treinamento, validação e teste (GOODFELLOW; BENGIO; COURVILLE, 2016; HASTIE; TIBSHIRANI; FRIEDMAN, 2009). Dessa forma, utiliza-se a maior parte dos dados para o treinamento (70\%), enquanto subconjuntos menores são reservados para o ajuste de hiperparâmetros (15\% em validação) e para a avaliação final e imparcial do desempenho do modelo (15\% em teste).
+
+\textcolor{green}{Não entendi a explicação do parágrafo a seguir (podemos conversar sobre na próxima reunião):}
+
+Além disso, essa divisão estática foi escolhida em detrimento da Validação Cruzada (\textit{Cross Validation}) para evitar o vazamento de dados (\textit{data leakage}). Em sistemas de recomendação com forte dependência temporal, a ordem em que os eventos ocorrem é fundamental. Atributos como a coocorrência de \textit{tags} (quais assuntos aparecem juntos) e a influência do grafo social (quem interage com quem) representam o estado da rede em um determinado momento. Se a Validação Cruzada clássica fosse aplicada, o modelo poderia utilizar interações que ocorreram no futuro para prever eventos do passado, o que não reflete o cenário real de uso. Portanto, a divisão estática garante que as estatísticas da rede sejam calculadas exclusivamente com dados do conjunto de treino, preservando a validade da avaliação e evitando o custo computacional proibitivo de reconstruir o grafo social a cada iteração (\textit{fold}).
+
+\subsubsection{Etapa 4: Treinamento dos modelos}
+
+Nesta etapa, duas abordagens foram desenvolvidas e treinadas para o sistema de recomendação: um modelo híbrido de referência e uma trilha de aprendizado para ranqueamento.
+
+\paragraph{Modelo híbrido de referência (\textit{Baseline})}
 
 O modelo adotado como base de comparação (\textit{baseline}) no trabalho foi um sistema de recomendação híbrido de referência, concebido para combinar diferentes sinais de relevância em uma função de ordenação interpretável. A representação dos posts foi construída por vetorização binária das \textit{tags}, permitindo comparar a proximidade temática entre o conteúdo de entrada e o catálogo disponível.
 
-Sobre essa representação, o método combina cinco sinais principais: similaridade de conteúdo, coocorrência de \textit{tags}, recência, popularidade e influência do grafo social. Em termos gerais, o escore final do item pode ser entendido como uma combinação ponderada desses componentes, com pesos parametrizáveis conforme o experimento realizado:
+Sobre essa representação, o método combina cinco sinais principais: similaridade de conteúdo, coocorrência de \textit{tags}, recência, popularidade e influência do grafo social. Em termos gerais, o \textit{score} final do item é calculado como uma combinação ponderada desses componentes, conforme a Equação \ref{eq:score_hibrido} apresentada na fundamentação teórica, com pesos parametrizáveis conforme o experimento realizado.
 
-\begin{equation}
-\label{eq:score_hibrido}
-score(i,q) = w_c \cdot s_{c} + w_o \cdot s_{o} + w_r \cdot s_{r} + w_s \cdot s_{s} + w_p \cdot s_{p}
-\end{equation}
+\textcolor{green}{Podemos conversar na próxima reunião: acho que esse cálculo do score pode ser apresentado na fundamentação teórica e, nessa parte, somente citar que foi usado esse score}
 
-Onde:
-\begin{itemize}
-    \item $score(i,q)$ é a pontuação final de relevância do item $i$ para a consulta $q$;
-    \item $w_c, w_o, w_r, w_s, w_p$ são os pesos atribuídos a cada sinal, cuja soma é igual a 1;
-    \item $s_{c}$ é o escore de similaridade de conteúdo (cálculo de cosseno entre vetores de \textit{tags});
-    \item $s_{o}$ é o escore de coocorrência de \textit{tags};
-    \item $s_{r}$ é o escore de recência (decaimento temporal);
-    \item $s_{s}$ é o escore de influência do grafo social;
-    \item $s_{p}$ é o escore de popularidade histórica do item.
-\end{itemize}
+Para ilustrar como esses sinais são computados, o Algoritmo \ref{alg:treinamento} apresenta o pseudocódigo do treinamento. Diferentemente de redes neurais, o treinamento deste modelo não utiliza otimização por gradiente, mas sim o cálculo de estatísticas sobre o conjunto de treino.
+
+\begin{algorithm}[H]
+\caption{Treinamento do Modelo Híbrido (\textit{Baseline})}
+\label{alg:treinamento}
+\textbf{Entrada:} $posts\_fitness$, $interacoes\_fitness$, $grafo\_fitness$\\
+\textbf{Saída:} Artefatos estatísticos serializados para inferência\\
+\BlankLine
+\tcc{1. Vetorização de Tags (Sem gradiente)}
+$vocabulario \gets$ \text{Extrair todas as tags únicas de } $posts\_fitness$\;
+$matriz\_posts \gets$ \text{Criar matriz binária (posts $\times$ vocabulario)}\;
+
+\tcc{2. Mapa de Coocorrência de Tags}
+$mapa\_coocorrencia \gets$ \text{Dicionário vazio}\;
+\For{cada $post \in posts\_fitness$}{
+    \For{cada par de tags $(t_a, t_b)$ no $post$}{
+        $mapa\_coocorrencia[t_a][t_b] \gets mapa\_coocorrencia[t_a][t_b] + 1$\;
+    }
+}
+
+\tcc{3. Cálculo de Popularidade}
+$popularidade \gets$ \text{Vetor de tamanho } $|posts\_fitness|$\;
+\For{cada $post \in posts\_fitness$}{
+    $total\_interacoes \gets$ \text{Contar } $interacoes\_fitness$ \text{ associadas às tags do } $post$\;
+    $popularidade[post] \gets total\_interacoes$\;
+}
+
+\tcc{4. Cálculo de Influência Social}
+$grau\_usuarios \gets$ \text{Calcular grau (número de conexões) de cada usuário no } $grafo\_fitness$\;
+$score\_social \gets$ \text{Vetor de tamanho } $|posts\_fitness|$\;
+\For{cada $post \in posts\_fitness$}{
+    $usuarios\_interagiram \gets$ \text{Obter usuários que interagiram com o } $post$\;
+    $score\_social[post] \gets \sum_{u \in usuarios\_interagiram} grau\_usuarios[u]$\;
+}
+
+\text{Normalizar } $popularidade$ \text{ e } $score\_social$ \text{ para o intervalo } $[0, 1]$\;
+\Return{$matriz\_posts$, $mapa\_coocorrencia$, $popularidade$, $score\_social$}\;
+\end{algorithm}
 
 Os valores dos pesos ($w$) podem ser definidos de duas formas: (1) empiricamente, baseados na literatura, priorizando a similaridade de conteúdo ($w_c = 0.40$) e a coocorrência ($w_o = 0.25$), ou (2) otimizados automaticamente por meio de uma busca em grade (\textit{grid search}) sobre o conjunto de validação, visando maximizar a métrica NDCG@10. A escolha dessa arquitetura se justifica por três razões principais: interpretabilidade, aderência aos metadados ricos do \textit{LDBC SNB} e baixo custo computacional para treino e inferência.
 
-\subsubsection{Trilha de aprendizado para ranqueamento}
+\paragraph{Trilha de aprendizado para ranqueamento}
 
 Como segunda família de modelos, foi implementada uma trilha de aprendizado para ranqueamento (\textit{Learning to Rank}). Nessa etapa, foram construídos conjuntos de pares consulta-item (\textit{query-item}) a partir dos dados de treino e validação, com geração de exemplos positivos e amostragem de exemplos negativos. Também foram utilizados candidatos difíceis, isto é, itens potencialmente próximos da consulta, mas não observados como relevantes, de modo a tornar o treinamento mais informativo.
 
-Sobre esses dados, o \textit{LightGBMRanker} aprende uma função de ordenação a partir de atributos derivados dos mesmos sinais utilizados no modelo híbrido de referência. Assim, em vez de depender apenas de pesos definidos manualmente, a ordem dos conteúdos passa a ser ajustada por um processo supervisionado. No escopo deste TCC, essa trilha foi adotada como base comparativa para verificar em que medida a aprendizagem da ordenação pode superar uma combinação manual e explicável de sinais.
+Sobre esses dados, o \textit{LightGBMRanker} aprende uma função de ordenação a partir de atributos derivados dos mesmos sinais utilizados no modelo híbrido de referência. Assim, em vez de depender apenas de pesos definidos manualmente, a ordem dos conteúdos passa a ser ajustada por um processo supervisionado. Essa trilha foi adotada como base comparativa para verificar em que medida a aprendizagem da ordenação pode superar uma combinação manual e explicável de sinais.
 
-\subsubsection{Rastreabilidade e reprodutibilidade}
+\subsubsection{Etapa 5: Avaliação e rastreabilidade dos experimentos}
 
 Para assegurar reprodutibilidade, cada execução foi associada a um identificador técnico da base, que isola diretórios de extração, dados preparados, conjuntos experimentais, modelos e resultados. Além disso, cada experimento registra seus parâmetros e sua proveniência em arquivos de manifesto, permitindo identificar com precisão qual base, qual configuração e quais artefatos foram utilizados em cada treinamento.
 
@@ -371,6 +470,38 @@ Final & \texttt{SF30} & Consolidar os resultados a serem apresentados na versão
 A expressão modo \textit{offline} designa uma avaliação realizada fora do ambiente real de uso do sistema. Em vez de medir o comportamento de usuários em produção, o modelo é testado sobre dados previamente reservados, o que permite comparar diferentes configurações sob as mesmas condições experimentais.
 
 Nesta avaliação, utiliza-se o conjunto de teste. Para cada usuário, as interações são ordenadas temporalmente; cada interação observada é tratada como item de referência, e o conjunto de interações futuras do mesmo usuário constitui a resposta relevante para comparação. A partir das \textit{tags} e do instante temporal do item de referência, o recomendador gera uma lista ordenada de candidatos, que então é confrontada com os itens realmente acessados em seguida.
+
+O Algoritmo \ref{alg:avaliacao} detalha a lógica desse protocolo de avaliação. Ele demonstra como o sistema agrupa as interações por usuário, ordena-as cronologicamente e separa uma interação como referência e as subsequentes como gabarito (\textit{ground truth}), para então calcular as métricas sobre o Top-K gerado pelo modelo.
+
+\begin{algorithm}[H]
+\caption{Protocolo de Avaliação \textit{Offline}}
+\label{alg:avaliacao}
+\textbf{Entrada:} Conjunto de teste ($interacoes\_teste$), Modelo treinado, $K$ (tamanho da lista)\\
+\textbf{Saída:} Métricas de avaliação (NDCG@K, MRR@K, etc.)\\
+\BlankLine
+$resultados \gets \emptyset$\;
+$interacoes\_por\_usuario \gets$ \text{Agrupar } $interacoes\_teste$ \text{ por usuário}\;
+
+\For{cada $(usuario, interacoes) \in interacoes\_por\_usuario$}{
+    $interacoes\_ordenadas \gets$ \text{Ordenar } $interacoes$ \text{ por tempo}\;
+    
+    \For{$i \gets 0$ \KwTo $|interacoes\_ordenadas| - 2$}{
+        $referencia \gets interacoes\_ordenadas[i]$\;
+        $gabarito \gets \{interacoes\_ordenadas[j].post \mid j > i\}$\;
+        
+        \If{$gabarito \neq \emptyset$}{
+            $lista\_recomendada \gets$ \text{Modelo.Recomendar(}$referencia.tags, referencia.tempo, K$\text{)}\;
+            
+            $acertos \gets lista\_recomendada \cap gabarito$\;
+            $ndcg \gets$ \text{Calcular NDCG(}$lista\_recomendada, gabarito$\text{)}\;
+            $mrr \gets$ \text{Calcular MRR(}$lista\_recomendada, gabarito$\text{)}\;
+            
+            $resultados \gets resultados \cup \{(ndcg, mrr, \dots)\}$\;
+        }
+    }
+}
+\Return{\text{Média de todas as métricas em } $resultados$}\;
+\end{algorithm}
 
 Para mensurar a qualidade do ranqueamento, foram adotadas métricas que consideram tanto a presença de itens relevantes quanto sua posição na lista recomendada. Nesta seção:
 
@@ -567,7 +698,7 @@ Como limitação atual do protocolo, a versão personalizada da trilha LTR, base
 
 % \section{Conclusão}
 
-% \textcolor{red}{Conclusão entra só no TCC2. Pode deixar aqui comentado}
+% \textcolor{green}{Conclusão entra só no TCC2. Pode deixar aqui comentado}
 
 % A implementação do FitConnect surgiu da necessidade de tornar a prática de atividade física mais prática, interativa, inteligente e segura. Foram desenvolvidas, para isso, diferentes tecnologias: um aplicativo para dispositivos móveis com possibilidade de integração a uma pulseira vestível, uma interface web para acompanhamento do progresso e um sistema de recomendação de atividades baseado em Inteligência Artificial (IA). 
 
