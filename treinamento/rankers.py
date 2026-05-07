@@ -71,10 +71,11 @@ class BaseRanker:
         tags: list[str],
         timestamp: int,
         top_k: int = 10,
-        excluir_tags_exatas: bool = True,
+        excluir_tags_exatas: bool = False,
         peso_popularidade: float = PESO_POPULARIDADE,
         user_id: int | None = None,
         include_internal: bool = False,
+        excluir_message_ids: set[int] | None = None,
     ) -> pd.DataFrame:
         raise NotImplementedError
 
@@ -272,10 +273,11 @@ class WeightedHybridRanker(BaseRanker):
         tags: list[str],
         timestamp: int,
         top_k: int = 10,
-        excluir_tags_exatas: bool = True,
+        excluir_tags_exatas: bool = False,
         peso_popularidade: float = PESO_POPULARIDADE,
         user_id: int | None = None,
         include_internal: bool = False,
+        excluir_message_ids: set[int] | None = None,
     ) -> pd.DataFrame:
         tags_norm = normalize_query_tags(tags)
         if not tags_norm:
@@ -299,6 +301,11 @@ class WeightedHybridRanker(BaseRanker):
             resultado = resultado[
                 resultado["tags_fitness"].apply(lambda value: set(value) != tags_set)
             ]
+
+        if excluir_message_ids and "_message_id" in resultado.columns:
+            ids_set = {int(mid) for mid in excluir_message_ids}
+            mids = pd.to_numeric(resultado["_message_id"], errors="coerce")
+            resultado = resultado[~mids.isin(ids_set) | mids.isna()]
 
         resultado = resultado.sort_values(
             "relevance_score", ascending=False
@@ -363,6 +370,7 @@ class LightGBMLTRRanker(BaseRanker):
         tags: list[str],
         timestamp: int,
         user_id: int | None = None,
+        user_history_size: int = 0,
     ) -> tuple[np.ndarray, pd.DataFrame]:
         if self.artifacts is None or self.booster is None:
             raise RuntimeError("Ranker não carregado.")
@@ -373,6 +381,7 @@ class LightGBMLTRRanker(BaseRanker):
             timestamp_entrada=timestamp,
             user_id=user_id,
             categorical_maps=self.categorical_maps or None,
+            user_history_size=int(user_history_size),
         )
         if not self.feature_columns:
             raise RuntimeError("Schema de features do LTR ausente ou inválido.")
@@ -386,10 +395,11 @@ class LightGBMLTRRanker(BaseRanker):
         tags: list[str],
         timestamp: int,
         top_k: int = 10,
-        excluir_tags_exatas: bool = True,
+        excluir_tags_exatas: bool = False,
         peso_popularidade: float = PESO_POPULARIDADE,
         user_id: int | None = None,
         include_internal: bool = False,
+        excluir_message_ids: set[int] | None = None,
     ) -> pd.DataFrame:
         del peso_popularidade  # não usado na família LTR
 
@@ -409,6 +419,11 @@ class LightGBMLTRRanker(BaseRanker):
             resultado = resultado[
                 resultado["tags_fitness"].apply(lambda value: set(value) != tags_set)
             ]
+
+        if excluir_message_ids and "_message_id" in resultado.columns:
+            ids_set = {int(mid) for mid in excluir_message_ids}
+            mids = pd.to_numeric(resultado["_message_id"], errors="coerce")
+            resultado = resultado[~mids.isin(ids_set) | mids.isna()]
 
         resultado = resultado.sort_values(
             "relevance_score", ascending=False

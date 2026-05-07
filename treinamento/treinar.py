@@ -511,7 +511,7 @@ def salvar_metadata(
             "vocabulary_coverage": vocabulary_coverage,
         },
         "params": {
-            "excluir_tags_exatas": True,
+            "excluir_tags_exatas": False,
             "peso_popularidade": 0.10,
         },
     }

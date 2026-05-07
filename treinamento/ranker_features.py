@@ -295,6 +295,7 @@ def build_feature_frame(
     timestamp_entrada: int,
     user_id: int | None = None,
     categorical_maps: dict[str, dict[str, int]] | None = None,
+    user_history_size: int = 0,
 ) -> pd.DataFrame:
     posts = artifacts.posts_cache
     tags_norm = normalize_query_tags(tags_entrada)
@@ -318,6 +319,21 @@ def build_feature_frame(
     ss = score_social(artifacts.social_scores, len(posts))
     sp = score_popularidade(artifacts.popularidade, len(posts))
     su = score_user_affinity(artifacts.user_tag_profile, posts, user_id)
+
+    # Diferença em dias (com sinal) entre criação do candidato e timestamp da query.
+    # Negativo = candidato é mais antigo que a query; positivo = mais novo.
+    if "creation_date" in posts.columns:
+        creation_ms = pd.to_numeric(posts["creation_date"], errors="coerce").fillna(0).values
+        timestamp_diff_days = (
+            (creation_ms.astype(np.float64) - float(timestamp_entrada)) / MS_POR_DIA
+        ).astype(np.float32)
+    else:
+        timestamp_diff_days = np.zeros(len(posts), dtype=np.float32)
+    timestamp_diff_abs_days = np.abs(timestamp_diff_days).astype(np.float32)
+
+    candidate_popularity_log = np.log1p(
+        np.clip(sp.astype(np.float64), 0.0, None)
+    ).astype(np.float32)
 
     maps = categorical_maps or build_categorical_maps(posts)
     query_set = set(tags_norm)
@@ -390,6 +406,12 @@ def build_feature_frame(
                     for value in language
                 ],
                 dtype=np.float32,
+            ),
+            "timestamp_diff_days": timestamp_diff_days,
+            "timestamp_diff_abs_days": timestamp_diff_abs_days,
+            "candidate_popularity_log": candidate_popularity_log,
+            "user_history_size": np.full(
+                len(posts), float(user_history_size), dtype=np.float32
             ),
             "baseline_score": baseline_score.astype(np.float32),
         }

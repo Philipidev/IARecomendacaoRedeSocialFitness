@@ -30,12 +30,17 @@ DEFAULT_FEATURES = [
     "time_decay_score",
     "social_score",
     "popularidade_score",
+    "user_affinity_score",
     "tag_overlap_count",
     "tag_jaccard",
     "num_tags_candidate",
     "content_length",
     "message_type_code",
     "language_code",
+    "timestamp_diff_days",
+    "timestamp_diff_abs_days",
+    "candidate_popularity_log",
+    "user_history_size",
 ]
 
 
@@ -192,6 +197,7 @@ def _sample_queries(
                     "future_ids": future_ids,
                     "tags_ref": tags_ref,
                     "timestamp_ref": int(timestamp_ref),
+                    "user_history_size": int(i + 1),
                 }
             )
 
@@ -264,7 +270,9 @@ def _build_query_rows(
             artifacts,
             tags_entrada=query["tags_ref"],
             timestamp_entrada=query["timestamp_ref"],
+            user_id=query.get("user_id"),
             categorical_maps=categorical_maps,
+            user_history_size=int(query.get("user_history_size", 0)),
         )
         coverage = features_df.attrs.get("query_coverage", {})
         unknown_count = int(coverage.get("unknown_count", 0))

@@ -20,6 +20,7 @@ if str(ROOT) not in sys.path:
 from avaliacao.offline_protocol import (
     build_future_queries,
     load_split_interactions,
+    load_split_strategy,
     parse_tags as parse_tags_offline,
     resolve_dataset_dirs,
 )
@@ -70,12 +71,14 @@ def recomendar_ids(
     tags_referencia: list[str],
     timestamp_referencia: int,
     top_k: int,
+    excluir_message_ids: set[int] | None = None,
 ) -> tuple[list[int], list[list[str]], list[float], list[int]]:
     df = ranker.recommend_df(
         tags=tags_referencia,
         timestamp=timestamp_referencia,
         top_k=top_k,
         include_internal=True,
+        excluir_message_ids=excluir_message_ids,
     )
     if df.empty:
         return [], [], [], []
@@ -195,15 +198,38 @@ def _total_consultas_candidatas(interactions: pd.DataFrame) -> int:
     )
 
 
+def _bootstrap_ci(values: list[float], n_iters: int = 1000, seed: int = 42) -> tuple[float, float]:
+    if not values:
+        return 0.0, 0.0
+    arr = np.asarray(values, dtype=np.float64)
+    if len(arr) < 2:
+        return float(arr[0]), float(arr[0])
+    rng = np.random.default_rng(seed)
+    means = []
+    n = len(arr)
+    for _ in range(n_iters):
+        sample = rng.choice(arr, size=n, replace=True)
+        means.append(float(sample.mean()))
+    lo = float(np.percentile(means, 2.5))
+    hi = float(np.percentile(means, 97.5))
+    return lo, hi
+
+
 def avaliar(
     ranker,
     ks: list[int],
     model_dir: Path,
     splits_dir: Path,
     output_dir: Path,
+    *,
+    bootstrap_iters: int = 1000,
+    bootstrap_seed: int = 42,
 ) -> tuple[dict, pd.DataFrame, pd.DataFrame]:
     test_interactions = load_split_interactions(splits_dir, "test")
-    queries = build_future_queries(ranker, test_interactions, output_dir)
+    queries = build_future_queries(
+        ranker, test_interactions, output_dir, splits_dir=splits_dir
+    )
+    strategy_info = load_split_strategy(splits_dir)
 
     catalogo_total = len(ranker.artifacts.posts_cache)
     uso_catalogo = set()
@@ -235,6 +261,7 @@ def avaliar(
                 tags_referencia=query.reference_tags,
                 timestamp_referencia=query.reference_timestamp_ms,
                 top_k=max(ks),
+                excluir_message_ids=query.seen_message_ids,
             )
             latencias_ms.append((perf_counter() - started) * 1000.0)
 
@@ -296,14 +323,33 @@ def avaliar(
 
     rows_metricas = []
     resumo_metricas = {}
+    intervalos_confianca: dict[str, dict[str, float]] = {}
 
     for k in ks:
         metricas_k = {}
         for nome in ["precision", "recall", "hitrate", "map", "ndcg", "mrr"]:
             valores = acumuladores[k][nome]
             media = float(np.mean(valores)) if valores else 0.0
-            metricas_k[f"{nome}@{k}"] = media
-            rows_metricas.append({"k": k, "metrica": nome, "valor": media})
+            chave = f"{nome}@{k}"
+            metricas_k[chave] = media
+            ci_lo, ci_hi = _bootstrap_ci(
+                valores, n_iters=bootstrap_iters, seed=bootstrap_seed
+            )
+            intervalos_confianca[chave] = {
+                "ci95_low": ci_lo,
+                "ci95_high": ci_hi,
+                "n": int(len(valores)),
+            }
+            rows_metricas.append(
+                {
+                    "k": k,
+                    "metrica": nome,
+                    "valor": media,
+                    "ci95_low": ci_lo,
+                    "ci95_high": ci_hi,
+                    "n": int(len(valores)),
+                }
+            )
         resumo_metricas.update(metricas_k)
 
     cobertura = len(uso_catalogo) / catalogo_total if catalogo_total > 0 else 0.0
@@ -339,11 +385,16 @@ def avaliar(
             and bool(model_split_signature)
             and current_split_signature == model_split_signature
         ),
+        "split_strategy": strategy_info.get("strategy"),
+        "cut_val_test_ms": strategy_info.get("cut_val_test_ms"),
+        "leave_last_k": strategy_info.get("leave_last_k"),
+        "bootstrap_iters": int(bootstrap_iters),
     }
 
     resumo = {
         "metadata": metadata,
         "ranking_metrics": resumo_metricas,
+        "ranking_metrics_ci95": intervalos_confianca,
         "business_metrics": resumo_negocio,
     }
 
@@ -381,8 +432,15 @@ def salvar_resultados(
         "## Métricas de ranking\n",
     ]
 
+    intervalos = resumo.get("ranking_metrics_ci95", {})
     for chave, valor in resumo["ranking_metrics"].items():
-        linhas_md.append(f"- **{chave}**: {valor:.4f}\n")
+        ci = intervalos.get(chave) or {}
+        if "ci95_low" in ci and "ci95_high" in ci:
+            linhas_md.append(
+                f"- **{chave}**: {valor:.4f} (IC 95%: {ci['ci95_low']:.4f} – {ci['ci95_high']:.4f}, n={ci.get('n', 0)})\n"
+            )
+        else:
+            linhas_md.append(f"- **{chave}**: {valor:.4f}\n")
 
     linhas_md.append("\n## Métricas de negócio/TCC\n")
     linhas_md.append(f"- **Cobertura de catálogo**: {resumo['business_metrics']['catalog_coverage']:.4f}\n")
@@ -441,6 +499,18 @@ def main() -> None:
         default=None,
         help="Override opcional do diretório de parquets extraídos",
     )
+    parser.add_argument(
+        "--bootstrap-iters",
+        type=int,
+        default=1000,
+        help="Iterações do bootstrap para IC 95%% das métricas (0 = sem IC).",
+    )
+    parser.add_argument(
+        "--bootstrap-seed",
+        type=int,
+        default=42,
+        help="Seed do bootstrap.",
+    )
     args = parser.parse_args()
 
     ks = _normalizar_k(args.k)
@@ -462,6 +532,8 @@ def main() -> None:
         model_dir,
         splits_dir,
         output_dir,
+        bootstrap_iters=max(0, int(args.bootstrap_iters)),
+        bootstrap_seed=int(args.bootstrap_seed),
     )
     caminho_json, caminho_csv, caminho_md = salvar_resultados(
         resumo, df_metricas, df_queries, out_dir

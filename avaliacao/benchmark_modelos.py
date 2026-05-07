@@ -68,12 +68,18 @@ def _load_config(config_path: Path) -> dict[str, Any]:
     return payload
 
 
-def _split_signature(split_config: dict[str, Any]) -> tuple[float, float, float, int]:
+def _split_signature(split_config: dict[str, Any]) -> tuple[float, float, float, int, str, int]:
+    from pipeline_contracts import DEFAULT_SPLIT_STRATEGY
+
+    strategy = str(split_config.get("strategy") or DEFAULT_SPLIT_STRATEGY)
+    leave_last_k = int(split_config.get("leave_last_k", 1) or 1)
     return (
         float(split_config.get("train", 0.70)),
         float(split_config.get("val", 0.15)),
         float(split_config.get("test", 0.15)),
         int(split_config.get("seed", 42)),
+        strategy,
+        leave_last_k,
     )
 
 
@@ -456,6 +462,10 @@ def main() -> None:
                     str(split_tuple[2]),
                     "--seed",
                     str(split_tuple[3]),
+                    "--strategy",
+                    str(split_tuple[4]),
+                    "--leave-last-k",
+                    str(split_tuple[5]),
                 ],
             )
             last_split = split_tuple

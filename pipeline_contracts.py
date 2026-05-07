@@ -42,13 +42,23 @@ def timestamp_to_ms(value: Any) -> int | None:
         return None
 
 
+VALID_SPLIT_STRATEGIES = ("random", "temporal_global", "leave_last_k")
+DEFAULT_SPLIT_STRATEGY = "temporal_global"
+
+
 def normalize_split_config(split_config: dict[str, Any] | None) -> dict[str, Any]:
     payload = split_config or {}
+    strategy = str(payload.get("strategy") or DEFAULT_SPLIT_STRATEGY).strip()
+    if strategy not in VALID_SPLIT_STRATEGIES:
+        strategy = DEFAULT_SPLIT_STRATEGY
+    leave_last_k = int(payload.get("leave_last_k", 1) or 1)
     return {
         "train": round(float(payload.get("train", 0.70)), 10),
         "val": round(float(payload.get("val", 0.15)), 10),
         "test": round(float(payload.get("test", 0.15)), 10),
         "seed": int(payload.get("seed", 42)),
+        "strategy": strategy,
+        "leave_last_k": max(1, leave_last_k),
     }
 
 
