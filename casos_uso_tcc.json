@@ -8,6 +8,33 @@
   },
   "modelos": [
     {
+      "id": "popularity_baseline",
+      "enabled": true,
+      "family": "popularity",
+      "descricao": "Baseline canônico de popularidade pura — recomenda os itens mais populares globalmente, ignorando query/usuário. Serve como referência mínima do TCC.",
+      "split_config": {
+        "strategy": "temporal_global",
+        "train": 0.7,
+        "val": 0.15,
+        "test": 0.15,
+        "seed": 42
+      },
+      "training": {
+        "catalogo_completo": true,
+        "dataset_completo": false
+      },
+      "avaliacoes": {
+        "offline": true,
+        "manual": false,
+        "popularidade": false,
+        "otimizacao": false
+      },
+      "top_k": [5, 10, 20],
+      "metric_target": "ndcg@10",
+      "params": {},
+      "notes": "Se algum modelo do TCC perder para esta linha, há algo errado com o protocolo ou com o modelo."
+    },
+    {
       "id": "baseline_hibrido_padrao",
       "enabled": true,
       "family": "baseline_hibrido",

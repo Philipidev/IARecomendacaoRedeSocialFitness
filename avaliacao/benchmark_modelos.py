@@ -549,6 +549,11 @@ def main() -> None:
             else:
                 _write_baseline_weights(model_dir, params)
 
+        elif family == "popularity":
+            # Popularity usa apenas os artefatos do treinador base (popularidade.npy
+            # e posts_cache). Nenhum passo adicional de treino é necessário.
+            pass
+
         elif family == "ltr_lightgbm":
             dataset_cfg = model_cfg.get("dataset_ltr", {})
             features_enabled = _features_enabled(model_cfg)

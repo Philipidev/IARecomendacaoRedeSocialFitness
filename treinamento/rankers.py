@@ -452,8 +452,97 @@ class LightGBMLTRRanker(BaseRanker):
         )
 
 
+class PopularityRanker(BaseRanker):
+    """
+    Baseline canônico de recsys: ignora a query (tags/timestamp/usuário) e
+    sempre retorna os itens mais populares do catálogo. Usa o mesmo
+    `popularidade.npy` produzido pelo treinador base.
+
+    Serve como referência mínima — se um modelo não bate o baseline de
+    Popularidade pura, há algo de errado.
+    """
+
+    family = "popularity"
+
+    def __init__(self, model_dir: str | Path | None = None) -> None:
+        super().__init__(model_dir)
+        self._popularidade: np.ndarray | None = None
+        self._posts: pd.DataFrame | None = None
+
+    def carregar(self) -> "PopularityRanker":
+        self.metadata = load_model_metadata(self.model_dir)
+        self.artifacts = load_base_artifacts(self.model_dir)
+        self._popularidade = self.artifacts.popularidade
+        self._posts = self.artifacts.posts_cache
+        return self
+
+    def recommend_df(
+        self,
+        tags: list[str],
+        timestamp: int,
+        top_k: int = 10,
+        excluir_tags_exatas: bool = False,
+        peso_popularidade: float = PESO_POPULARIDADE,
+        user_id: int | None = None,
+        include_internal: bool = False,
+        excluir_message_ids: set[int] | None = None,
+    ) -> pd.DataFrame:
+        del peso_popularidade, user_id, timestamp  # ignorados intencionalmente
+        if self._posts is None or self._popularidade is None:
+            raise RuntimeError("PopularityRanker não carregado.")
+
+        scores = score_popularidade(self._popularidade, len(self._posts))
+        resultado = self._posts.copy()
+        resultado["relevance_score"] = scores.round(4)
+        resultado["_catalog_index"] = np.arange(len(self._posts), dtype=np.int64)
+
+        tags_norm = normalize_query_tags(tags)
+        self.last_query_info = {
+            "family": self.family,
+            "tags": list(tags_norm),
+            "known_tags": [],
+            "unknown_tags": [],
+            "all_tags_oov": False,
+            "partial_oov": False,
+            "coverage_ratio": 0.0,
+        }
+
+        if excluir_tags_exatas and tags_norm:
+            tags_set = set(tags_norm)
+            resultado = resultado[
+                resultado["tags_fitness"].apply(lambda value: set(value) != tags_set)
+            ]
+
+        if excluir_message_ids and "_message_id" in resultado.columns:
+            ids_set = {int(mid) for mid in excluir_message_ids}
+            mids = pd.to_numeric(resultado["_message_id"], errors="coerce")
+            resultado = resultado[~mids.isin(ids_set) | mids.isna()]
+
+        resultado = resultado.sort_values("relevance_score", ascending=False).head(top_k)
+
+        if include_internal:
+            resultado["_query_oov_count"] = 0
+            resultado["_query_all_oov"] = False
+            resultado["_query_coverage_ratio"] = 0.0
+            return resultado.reset_index(drop=False)
+
+        colunas_saida = [
+            "message_type",
+            "creation_date_iso",
+            "tags_fitness",
+            "content_length",
+            "language",
+            "relevance_score",
+        ]
+        return resultado[[c for c in colunas_saida if c in resultado.columns]].reset_index(
+            drop=True
+        )
+
+
 def load_ranker(model_dir: str | Path | None = None) -> BaseRanker:
     family = infer_model_family(model_dir)
     if family == "ltr_lightgbm":
         return LightGBMLTRRanker(model_dir).carregar()
+    if family == "popularity":
+        return PopularityRanker(model_dir).carregar()
     return WeightedHybridRanker(model_dir).carregar()
