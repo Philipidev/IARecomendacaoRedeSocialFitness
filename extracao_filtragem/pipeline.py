@@ -48,6 +48,7 @@ TAGCLASS_FITNESS_KEYWORDS = [
     "sports", "health", "fitness", "running", "exercise", "gym", "athletic",
 ]
 TAG_FITNESS_NAME_TOKENS = {
+    # Núcleo original (treino e prática física)
     "treino",
     "academia",
     "corrida",
@@ -67,6 +68,52 @@ TAG_FITNESS_NAME_TOKENS = {
     "bodybuilding",
     "cardio",
     "lifting",
+    # Esportes individuais e modalidades aeróbicas
+    "swimming",
+    "swim",
+    "cycling",
+    "cyclist",
+    "biking",
+    "triathlon",
+    "athletics",
+    "athlete",
+    "athletic",
+    "rowing",
+    "skating",
+    "boxing",
+    "wrestling",
+    # Esportes coletivos
+    "football",
+    "soccer",
+    "basketball",
+    "tennis",
+    "volleyball",
+    "rugby",
+    "hockey",
+    "baseball",
+    "cricket",
+    # Termos de saúde, condicionamento e performance
+    "sport",
+    "sports",
+    "training",
+    "health",
+    "wellness",
+    "endurance",
+    "strength",
+    "aerobic",
+    "anaerobic",
+    "stretching",
+    "stamina",
+    "performance",
+    "muscle",
+    "weight",
+    # Competição e eventos
+    "race",
+    "championship",
+    "olympic",
+    "olympics",
+    "tournament",
+    "competition",
 }
 TAG_FITNESS_NAME_PHRASES = {
     "weight lifting",
@@ -191,8 +238,24 @@ def ensure_dirs(context: DatasetContext) -> None:
     )
 
 
-def extract_archive(dataset_path: Path, extraction_dir: Path) -> Path:
-    """Extrai .tar.zst com zstd + tar. Retorna o diretório base dos CSVs."""
+def extract_archive(
+    dataset_path: Path, extraction_dir: Path, *, reuse_existing: bool = False
+) -> Path:
+    """Extrai .tar.zst com zstd + tar. Retorna o diretório base dos CSVs.
+
+    Se ``reuse_existing`` for True e ``extraction_dir`` já contiver CSVs, a
+    extração é pulada. Útil para reprocessar parquets sem refazer toda a
+    descompactação do dataset.
+    """
+    if reuse_existing and extraction_dir.exists():
+        existing_csvs = list(extraction_dir.rglob("*.csv"))
+        if existing_csvs:
+            log(
+                f"Reaproveitando extração existente em {extraction_dir} "
+                f"({len(existing_csvs)} CSVs encontrados)."
+            )
+            return extraction_dir
+
     if not dataset_path.exists():
         raise FileNotFoundError(f"Dataset não encontrado: {dataset_path}")
 
@@ -463,10 +526,17 @@ def get_tag_fitness_selection(
     return sorted(selected_tag_ids), audit_payload
 
 
-def run_pipeline(dataset_path: Path, context: DatasetContext) -> None:
+def run_pipeline(
+    dataset_path: Path,
+    context: DatasetContext,
+    *,
+    reuse_extracted: bool = False,
+) -> None:
     """Executa o pipeline completo."""
     ensure_dirs(context)
-    base = extract_archive(dataset_path, context.extraction_dir)
+    base = extract_archive(
+        dataset_path, context.extraction_dir, reuse_existing=reuse_extracted
+    )
     mapping = discover_csv_files(base)
 
     log("Arquivos descobertos:")
@@ -998,12 +1068,20 @@ def main() -> None:
         default=None,
         help="Namespace lógico do dataset; por padrão deriva do nome do arquivo",
     )
+    parser.add_argument(
+        "--reuse-extracted",
+        action="store_true",
+        help=(
+            "Se passado, reaproveita os CSVs já presentes em extraction_dir "
+            "em vez de re-extrair o tar.zst."
+        ),
+    )
     args = parser.parse_args()
     dataset_path = args.dataset_path
     if not dataset_path.is_absolute():
         dataset_path = (ROOT / dataset_path).resolve()
     context = dataset_context(dataset_key=args.dataset_key, dataset_path=dataset_path)
-    run_pipeline(dataset_path, context)
+    run_pipeline(dataset_path, context, reuse_extracted=bool(args.reuse_extracted))
 
 
 if __name__ == "__main__":

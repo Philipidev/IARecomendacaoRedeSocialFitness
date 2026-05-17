@@ -44,6 +44,8 @@ class BaseArtifacts:
     posts_cache: pd.DataFrame
     user_tag_profile: pd.DataFrame | None
     metadata: dict[str, Any]
+    post_tag_embeddings: np.ndarray | None = None
+    tag_embeddings_by_name: dict[str, np.ndarray] | None = None
 
 
 @dataclass
@@ -130,6 +132,20 @@ def load_base_artifacts(model_dir: str | Path | None = None) -> BaseArtifacts:
         pd.read_parquet(profile_path) if profile_path.exists() else None
     )
 
+    post_tag_embeddings_path = model_path / "post_tag_embeddings.npy"
+    tag_embeddings_path = model_path / "tag_embeddings.npy"
+    post_tag_embeddings: np.ndarray | None = None
+    tag_embeddings_by_name: dict[str, np.ndarray] | None = None
+    if post_tag_embeddings_path.exists():
+        post_tag_embeddings = np.load(post_tag_embeddings_path).astype(np.float32)
+    if tag_embeddings_path.exists():
+        tag_embeddings = np.load(tag_embeddings_path).astype(np.float32)
+        classes = list(getattr(vectorizer, "classes_", []))
+        if len(classes) == tag_embeddings.shape[0]:
+            tag_embeddings_by_name = {
+                str(tag): tag_embeddings[i] for i, tag in enumerate(classes)
+            }
+
     return BaseArtifacts(
         model_dir=model_path,
         vectorizer=vectorizer,
@@ -140,6 +156,8 @@ def load_base_artifacts(model_dir: str | Path | None = None) -> BaseArtifacts:
         posts_cache=posts_cache,
         user_tag_profile=user_tag_profile,
         metadata=metadata,
+        post_tag_embeddings=post_tag_embeddings,
+        tag_embeddings_by_name=tag_embeddings_by_name,
     )
 
 
@@ -221,6 +239,44 @@ def score_popularidade(popularidade: np.ndarray | None, n_posts: int) -> np.ndar
     if popularidade is not None and len(popularidade) == n_posts:
         return popularidade.astype(np.float32)
     return np.zeros(n_posts, dtype=np.float32)
+
+
+def score_tag_embedding(
+    tag_embeddings_by_name: dict[str, np.ndarray] | None,
+    post_tag_embeddings: np.ndarray | None,
+    tags_entrada: list[str],
+) -> np.ndarray:
+    """Similaridade de cosseno entre o embedding semântico da consulta e o de cada post.
+
+    Tanto ``post_tag_embeddings`` quanto os vetores em ``tag_embeddings_by_name`` foram
+    gerados com o mesmo encoder (``sentence-transformers``) sobre os nomes das tags.
+    Posts e consulta sem tags válidas recebem similaridade 0.
+    """
+    if (
+        post_tag_embeddings is None
+        or tag_embeddings_by_name is None
+        or post_tag_embeddings.size == 0
+        or not tag_embeddings_by_name
+    ):
+        if post_tag_embeddings is None:
+            return np.zeros(0, dtype=np.float32)
+        return np.zeros(post_tag_embeddings.shape[0], dtype=np.float32)
+
+    tags_norm = normalize_query_tags(tags_entrada)
+    vetores = [
+        tag_embeddings_by_name[tag] for tag in tags_norm if tag in tag_embeddings_by_name
+    ]
+    if not vetores:
+        return np.zeros(post_tag_embeddings.shape[0], dtype=np.float32)
+
+    query_vec = np.mean(np.stack(vetores, axis=0), axis=0).astype(np.float32)
+    norm = float(np.linalg.norm(query_vec))
+    if norm == 0.0:
+        return np.zeros(post_tag_embeddings.shape[0], dtype=np.float32)
+    query_vec = query_vec / norm
+
+    sims = post_tag_embeddings @ query_vec
+    return sims.astype(np.float32)
 
 
 def score_user_affinity(
@@ -319,6 +375,13 @@ def build_feature_frame(
     ss = score_social(artifacts.social_scores, len(posts))
     sp = score_popularidade(artifacts.popularidade, len(posts))
     su = score_user_affinity(artifacts.user_tag_profile, posts, user_id)
+    se = score_tag_embedding(
+        artifacts.tag_embeddings_by_name,
+        artifacts.post_tag_embeddings,
+        tags_norm,
+    )
+    if len(se) != len(posts):
+        se = np.zeros(len(posts), dtype=np.float32)
 
     # Diferença em dias (com sinal) entre criação do candidato e timestamp da query.
     # Negativo = candidato é mais antigo que a query; positivo = mais novo.
@@ -373,6 +436,7 @@ def build_feature_frame(
             "social_score": ss,
             "popularidade_score": sp,
             "user_affinity_score": su,
+            "tag_embedding_similarity": se,
             "tag_overlap_count": np.array(tag_overlap_count, dtype=np.float32),
             "tag_jaccard": np.array(tag_jaccard, dtype=np.float32),
             "num_tags_candidate": np.array(num_tags_candidate, dtype=np.float32),

@@ -38,6 +38,7 @@ from pipeline_contracts import (
     detect_time_column,
     load_json_optional,
     timestamp_to_ms,
+    timestamps_series_to_ms,
 )
 from treinamento.model_utils import load_model_metadata
 
@@ -121,10 +122,13 @@ def _read_interactions_parquet(path: Path) -> pd.DataFrame:
     df = df.copy()
     df["message_id"] = pd.to_numeric(df["message_id"], errors="coerce").astype("Int64")
     df["user_id"] = pd.to_numeric(df["user_id"], errors="coerce").astype("Int64")
-    df["__ts_ms"] = df[tempo_col].apply(timestamp_to_ms)
-    if df["__ts_ms"].isna().all():
-        df["__ts_ms"] = np.arange(len(df), dtype=np.int64)
-    df["__ts_ms"] = pd.to_numeric(df["__ts_ms"], errors="coerce")
+    df["__ts_ms"] = timestamps_series_to_ms(df[tempo_col])
+    total = len(df)
+    if total > 0 and int(df["__ts_ms"].isna().sum()) == total:
+        raise ValueError(
+            f"{path.name}: coluna '{tempo_col}' tem 100% de timestamps inválidos. "
+            "Re-execute extracao_filtragem/pipeline.py e treinamento/dividir_dataset.py."
+        )
     df = df.dropna(subset=["message_id", "user_id", "__ts_ms"]).copy()
     df["message_id"] = df["message_id"].astype("int64")
     df["user_id"] = df["user_id"].astype("int64")
@@ -199,6 +203,12 @@ def _resolve_reference_post(
     return posts_cache.loc[fallback_idx]
 
 
+EMIT_REASON_FUTURE_VAZIO = "future_ids_vazio"
+EMIT_REASON_REF_NAO_RESOLVIDA = "ref_post_nao_resolvido"
+EMIT_REASON_REF_SEM_TAGS = "ref_sem_tags"
+EMIT_REASON_OK = "ok"
+
+
 def _emit_query(
     ranker,
     user_id: int,
@@ -208,7 +218,7 @@ def _emit_query(
     catalog_message_ids: set[int],
     message_to_row: dict[int, int],
     fallback_lookup: dict[int, int],
-) -> OfflineQuery | None:
+) -> tuple[OfflineQuery | None, str]:
     future_ids = {
         int(item["message_id"])
         for item in future_events
@@ -216,24 +226,24 @@ def _emit_query(
         and int(item["message_id"]) not in seen_ids
     }
     if not future_ids:
-        return None
+        return None, EMIT_REASON_FUTURE_VAZIO
 
     reference_message_id = int(reference_event["message_id"])
     ref_post = _resolve_reference_post(
         ranker, reference_message_id, message_to_row, fallback_lookup
     )
     if ref_post is None:
-        return None
+        return None, EMIT_REASON_REF_NAO_RESOLVIDA
 
     reference_tags = parse_tags(ref_post.get("tags_fitness", []))
     if not reference_tags:
-        return None
+        return None, EMIT_REASON_REF_SEM_TAGS
 
     reference_timestamp = timestamp_to_ms(ref_post.get("creation_date"))
     if reference_timestamp is None:
         reference_timestamp = int(reference_event["__ts_ms"])
 
-    return OfflineQuery(
+    query = OfflineQuery(
         user_id=int(user_id),
         reference_message_id=reference_message_id,
         reference_timestamp_ms=int(reference_timestamp),
@@ -241,6 +251,21 @@ def _emit_query(
         future_ids=future_ids,
         seen_message_ids=set(seen_ids),
     )
+    return query, EMIT_REASON_OK
+
+
+def _new_descartes_dict() -> dict[str, int]:
+    return {
+        "usuarios_total": 0,
+        "usuarios_menos_de_2_eventos": 0,
+        "usuarios_sem_before": 0,
+        "usuarios_sem_after": 0,
+        "usuarios_test_sem_referencia_anterior": 0,
+        "queries_construidas": 0,
+        EMIT_REASON_FUTURE_VAZIO: 0,
+        EMIT_REASON_REF_NAO_RESOLVIDA: 0,
+        EMIT_REASON_REF_SEM_TAGS: 0,
+    }
 
 
 def _build_temporal_queries(
@@ -250,25 +275,32 @@ def _build_temporal_queries(
     catalog_message_ids: set[int],
     message_to_row: dict[int, int],
     fallback_lookup: dict[int, int],
-) -> list[OfflineQuery]:
+) -> tuple[list[OfflineQuery], dict[str, int]]:
+    descartes = _new_descartes_dict()
     if cut_val_test_ms is None:
-        return []
+        return [], descartes
 
     queries: list[OfflineQuery] = []
     for user_id, group in full_history.groupby("user_id"):
+        descartes["usuarios_total"] += 1
         ordered = group.sort_values("__ts_ms")
         events = ordered[["message_id", "__ts_ms"]].to_dict("records")
         if len(events) < 2:
+            descartes["usuarios_menos_de_2_eventos"] += 1
             continue
 
         before = [e for e in events if int(e["__ts_ms"]) <= int(cut_val_test_ms)]
         after = [e for e in events if int(e["__ts_ms"]) > int(cut_val_test_ms)]
-        if not before or not after:
+        if not before:
+            descartes["usuarios_sem_before"] += 1
+            continue
+        if not after:
+            descartes["usuarios_sem_after"] += 1
             continue
 
         reference = before[-1]
         seen_ids = {int(e["message_id"]) for e in before}
-        query = _emit_query(
+        query, motivo = _emit_query(
             ranker,
             user_id=int(user_id),
             reference_event=reference,
@@ -280,7 +312,10 @@ def _build_temporal_queries(
         )
         if query is not None:
             queries.append(query)
-    return queries
+            descartes["queries_construidas"] += 1
+        else:
+            descartes[motivo] = descartes.get(motivo, 0) + 1
+    return queries, descartes
 
 
 def _build_leave_last_k_queries(
@@ -290,26 +325,28 @@ def _build_leave_last_k_queries(
     catalog_message_ids: set[int],
     message_to_row: dict[int, int],
     fallback_lookup: dict[int, int],
-) -> list[OfflineQuery]:
+) -> tuple[list[OfflineQuery], dict[str, int]]:
+    descartes = _new_descartes_dict()
     leave_last_k = max(1, int(leave_last_k))
     queries: list[OfflineQuery] = []
     for user_id, group in full_history.groupby("user_id"):
+        descartes["usuarios_total"] += 1
         ordered = group.sort_values("__ts_ms")
         events = ordered[["message_id", "__ts_ms", "__split"]].to_dict("records")
         n = len(events)
         if n < 2:
+            descartes["usuarios_menos_de_2_eventos"] += 1
             continue
-        # Test events são os marcados como "test" (caso o split tenha sido feito
-        # por leave_last_k). Se não houver, fallback: últimas K.
         test_events = [e for e in events if e.get("__split") == "test"]
         if not test_events:
             test_events = events[-leave_last_k:]
         cut_idx = events.index(test_events[0])
         if cut_idx == 0:
+            descartes["usuarios_test_sem_referencia_anterior"] += 1
             continue
         reference = events[cut_idx - 1]
         seen_ids = {int(e["message_id"]) for e in events[:cut_idx]}
-        query = _emit_query(
+        query, motivo = _emit_query(
             ranker,
             user_id=int(user_id),
             reference_event=reference,
@@ -321,7 +358,10 @@ def _build_leave_last_k_queries(
         )
         if query is not None:
             queries.append(query)
-    return queries
+            descartes["queries_construidas"] += 1
+        else:
+            descartes[motivo] = descartes.get(motivo, 0) + 1
+    return queries, descartes
 
 
 def _build_legacy_random_queries(
@@ -330,17 +370,20 @@ def _build_legacy_random_queries(
     catalog_message_ids: set[int],
     message_to_row: dict[int, int],
     fallback_lookup: dict[int, int],
-) -> list[OfflineQuery]:
+) -> tuple[list[OfflineQuery], dict[str, int]]:
+    descartes = _new_descartes_dict()
     queries: list[OfflineQuery] = []
     for user_id, group in test_interactions.groupby("user_id"):
+        descartes["usuarios_total"] += 1
         ordered = group.sort_values("__ts_ms")
         events = ordered[["message_id", "__ts_ms"]].to_dict("records")
         if len(events) < 2:
+            descartes["usuarios_menos_de_2_eventos"] += 1
             continue
         for idx, event in enumerate(events[:-1]):
             future = events[idx + 1 :]
             seen_ids = {int(e["message_id"]) for e in events[: idx + 1]}
-            query = _emit_query(
+            query, motivo = _emit_query(
                 ranker,
                 user_id=int(user_id),
                 reference_event=event,
@@ -352,7 +395,83 @@ def _build_legacy_random_queries(
             )
             if query is not None:
                 queries.append(query)
-    return queries
+                descartes["queries_construidas"] += 1
+            else:
+                descartes[motivo] = descartes.get(motivo, 0) + 1
+    return queries, descartes
+
+
+def build_future_queries_with_diagnostics(
+    ranker,
+    interactions: pd.DataFrame,
+    output_dir: Path,
+    *,
+    splits_dir: Path | None = None,
+) -> tuple[list[OfflineQuery], dict[str, Any]]:
+    """
+    Versão de ``build_future_queries`` que devolve também um dicionário com
+    contadores de descarte por causa, útil para diagnóstico quando a avaliação
+    fica com 0 consultas válidas.
+    """
+    message_to_row, fallback_lookup = build_catalog_lookup(ranker, output_dir)
+    catalog_message_ids = set(message_to_row)
+
+    strategy_info = (
+        load_split_strategy(splits_dir) if splits_dir is not None else {"strategy": "random"}
+    )
+    strategy = strategy_info.get("strategy", "random")
+
+    diagnostics: dict[str, Any] = {
+        "strategy": strategy,
+        "cut_val_test_ms": strategy_info.get("cut_val_test_ms"),
+        "leave_last_k": strategy_info.get("leave_last_k"),
+        "catalog_size": len(catalog_message_ids),
+    }
+
+    if strategy == "temporal_global" and splits_dir is not None:
+        full_history = load_full_history(splits_dir)
+        diagnostics["full_history_rows"] = int(len(full_history))
+        if full_history.empty:
+            diagnostics["descartes"] = _new_descartes_dict()
+            return [], diagnostics
+        queries, descartes = _build_temporal_queries(
+            ranker,
+            full_history=full_history,
+            cut_val_test_ms=strategy_info.get("cut_val_test_ms"),
+            catalog_message_ids=catalog_message_ids,
+            message_to_row=message_to_row,
+            fallback_lookup=fallback_lookup,
+        )
+        diagnostics["descartes"] = descartes
+        return queries, diagnostics
+
+    if strategy == "leave_last_k" and splits_dir is not None:
+        full_history = load_full_history(splits_dir)
+        diagnostics["full_history_rows"] = int(len(full_history))
+        if full_history.empty:
+            diagnostics["descartes"] = _new_descartes_dict()
+            return [], diagnostics
+        queries, descartes = _build_leave_last_k_queries(
+            ranker,
+            full_history=full_history,
+            leave_last_k=strategy_info.get("leave_last_k", 1),
+            catalog_message_ids=catalog_message_ids,
+            message_to_row=message_to_row,
+            fallback_lookup=fallback_lookup,
+        )
+        diagnostics["descartes"] = descartes
+        return queries, diagnostics
+
+    diagnostics["test_interactions_rows"] = int(len(interactions))
+    queries, descartes = _build_legacy_random_queries(
+        ranker,
+        test_interactions=interactions,
+        catalog_message_ids=catalog_message_ids,
+        message_to_row=message_to_row,
+        fallback_lookup=fallback_lookup,
+    )
+    diagnostics["descartes"] = descartes
+    return queries, diagnostics
 
 
 def build_future_queries(
@@ -369,44 +488,7 @@ def build_future_queries(
     Se `splits_dir` for fornecido e o manifesto indicar split temporal, o
     histórico completo é usado para evitar fragmentação do gabarito.
     """
-    message_to_row, fallback_lookup = build_catalog_lookup(ranker, output_dir)
-    catalog_message_ids = set(message_to_row)
-
-    strategy_info = (
-        load_split_strategy(splits_dir) if splits_dir is not None else {"strategy": "random"}
+    queries, _ = build_future_queries_with_diagnostics(
+        ranker, interactions, output_dir, splits_dir=splits_dir
     )
-    strategy = strategy_info.get("strategy", "random")
-
-    if strategy == "temporal_global" and splits_dir is not None:
-        full_history = load_full_history(splits_dir)
-        if full_history.empty:
-            return []
-        return _build_temporal_queries(
-            ranker,
-            full_history=full_history,
-            cut_val_test_ms=strategy_info.get("cut_val_test_ms"),
-            catalog_message_ids=catalog_message_ids,
-            message_to_row=message_to_row,
-            fallback_lookup=fallback_lookup,
-        )
-
-    if strategy == "leave_last_k" and splits_dir is not None:
-        full_history = load_full_history(splits_dir)
-        if full_history.empty:
-            return []
-        return _build_leave_last_k_queries(
-            ranker,
-            full_history=full_history,
-            leave_last_k=strategy_info.get("leave_last_k", 1),
-            catalog_message_ids=catalog_message_ids,
-            message_to_row=message_to_row,
-            fallback_lookup=fallback_lookup,
-        )
-
-    return _build_legacy_random_queries(
-        ranker,
-        test_interactions=interactions,
-        catalog_message_ids=catalog_message_ids,
-        message_to_row=message_to_row,
-        fallback_lookup=fallback_lookup,
-    )
+    return queries

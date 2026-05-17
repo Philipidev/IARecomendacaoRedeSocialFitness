@@ -440,6 +440,58 @@ def carregar_cooccurrence_df(
     return pd.DataFrame(columns=["tag_a", "tag_b", "cooccurrences"])
 
 
+def _gerar_tag_embeddings(
+    mlb: MultiLabelBinarizer,
+) -> np.ndarray | None:
+    """Gera um embedding semântico denso para cada tag usando ``sentence-transformers``.
+
+    Os nomes das tags do LDBC SNB costumam ser nomes reais (atletas, eventos,
+    modalidades). Um encoder pré-treinado consegue capturar similaridade semântica
+    entre essas tags, gerando um sinal contínuo complementar ao binário do
+    vetorizador. Retorna ``None`` se a biblioteca não estiver disponível.
+
+    A ordem das linhas segue exatamente ``mlb.classes_``, permitindo derivar o
+    embedding de qualquer post como a média dos embeddings das suas tags.
+    """
+    try:
+        from sentence_transformers import SentenceTransformer
+    except Exception as exc:
+        print(f"  [Aviso] sentence-transformers indisponível ({exc}); pulando embeddings.")
+        return None
+
+    tag_names = [str(t) for t in mlb.classes_]
+    if not tag_names:
+        return None
+
+    model_name = "sentence-transformers/all-MiniLM-L6-v2"
+    print(f"  Carregando encoder textual: {model_name}")
+    encoder = SentenceTransformer(model_name)
+    tag_embeddings = np.asarray(
+        encoder.encode(tag_names, convert_to_numpy=True, show_progress_bar=False),
+        dtype=np.float32,
+    )
+    dim = tag_embeddings.shape[1]
+    print(
+        f"  Embeddings de tag computados: {len(tag_names)} tags x {dim} dimensões"
+    )
+    return tag_embeddings
+
+
+def _derivar_post_embeddings(
+    tag_embeddings: np.ndarray,
+    post_matrix: np.ndarray,
+) -> np.ndarray:
+    """Calcula o embedding por post como média (normalizada L2) dos embeddings das tags."""
+    matrix = post_matrix.astype(np.float32)
+    contagens = matrix.sum(axis=1)
+    contagens_safe = np.where(contagens == 0.0, 1.0, contagens)
+    post_embeddings = (matrix @ tag_embeddings) / contagens_safe[:, None]
+    post_embeddings = post_embeddings.astype(np.float32)
+    norms = np.linalg.norm(post_embeddings, axis=1, keepdims=True)
+    norms = np.where(norms == 0.0, 1.0, norms)
+    return (post_embeddings / norms).astype(np.float32)
+
+
 def salvar_artefatos(
     model_dir: Path,
     mlb: MultiLabelBinarizer,
@@ -467,6 +519,18 @@ def salvar_artefatos(
 
     np.save(model_dir / "social_scores.npy", social_scores)
     print(f"  social_scores.npy salvo: shape {social_scores.shape}")
+
+    tag_embeddings = _gerar_tag_embeddings(mlb)
+    if tag_embeddings is not None:
+        np.save(model_dir / "tag_embeddings.npy", tag_embeddings)
+        print(
+            f"  tag_embeddings.npy salvo: shape {tag_embeddings.shape}"
+        )
+        post_tag_embeddings = _derivar_post_embeddings(tag_embeddings, post_matrix)
+        np.save(model_dir / "post_tag_embeddings.npy", post_tag_embeddings)
+        print(
+            f"  post_tag_embeddings.npy salvo: shape {post_tag_embeddings.shape}"
+        )
 
     posts_cache = posts_catalogo.copy()
     posts_cache["tags_fitness"] = posts_cache["tags_fitness"].apply(

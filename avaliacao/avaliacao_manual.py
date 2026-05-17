@@ -150,7 +150,11 @@ def _preparar_saida(df: pd.DataFrame) -> pd.DataFrame:
     saida = df.copy()
     if "creation_date_iso" in saida.columns:
         dt = pd.to_datetime(saida["creation_date_iso"], errors="coerce", utc=True)
-        saida["creation_timestamp_ms"] = (dt.view("int64") // 10**6).astype("Int64")
+        ms_values = pd.Series(pd.NA, index=saida.index, dtype="Int64")
+        valid = dt.notna()
+        if valid.any():
+            ms_values.loc[valid] = (dt.loc[valid].astype("int64") // 10**6).astype("Int64")
+        saida["creation_timestamp_ms"] = ms_values
     elif "creation_date" in saida.columns:
         saida["creation_timestamp_ms"] = pd.to_numeric(saida["creation_date"], errors="coerce").astype("Int64")
     else:
@@ -165,7 +169,35 @@ def _preparar_saida(df: pd.DataFrame) -> pd.DataFrame:
 def _tabela_markdown(df: pd.DataFrame, colunas: list[str]) -> str:
     if df.empty:
         return "Sem resultados retornados.\n"
-    return df[colunas].to_markdown(index=True)
+    try:
+        return df[colunas].to_markdown(index=True)
+    except ImportError:
+        return _tabela_markdown_fallback(df[colunas])
+
+
+def _tabela_markdown_fallback(df: pd.DataFrame) -> str:
+    """Renderização markdown sem dependência opcional de ``tabulate``."""
+    if df.empty:
+        return "Sem resultados retornados.\n"
+    cols = list(df.columns)
+    header = "| index | " + " | ".join(str(c) for c in cols) + " |"
+    sep = "| --- | " + " | ".join(["---"] * len(cols)) + " |"
+    linhas = [header, sep]
+
+    def _fmt_value(v) -> str:
+        if isinstance(v, (list, tuple)):
+            return ", ".join(str(x) for x in v)
+        try:
+            if pd.isna(v):
+                return ""
+        except (TypeError, ValueError):
+            pass
+        return str(v)
+
+    for idx, row in df.iterrows():
+        valores = [_fmt_value(row[c]).replace("|", "\\|") for c in cols]
+        linhas.append(f"| {idx} | " + " | ".join(valores) + " |")
+    return "\n".join(linhas)
 
 
 def _gerar_relatorio(casos_resultados: list[dict[str, Any]], destino: Path) -> None:

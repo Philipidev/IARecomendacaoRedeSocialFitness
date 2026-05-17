@@ -13,7 +13,12 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from dataset_context import dataset_context, dataset_context_from_metadata, manifest_path
-from pipeline_contracts import split_signature_from_manifest_file, split_signature_from_metadata
+from pipeline_contracts import (
+    split_signature_from_manifest_file,
+    split_signature_from_metadata,
+    timestamp_to_ms,
+    timestamps_series_to_ms,
+)
 from progress_utils import IterationProgress, StageProgress
 from treinamento.model_utils import load_model_metadata, rel_path, resolve_model_dir, write_json
 from treinamento.ranker_features import (
@@ -65,18 +70,6 @@ def _detectar_coluna_tempo(interactions: pd.DataFrame) -> str | None:
     return None
 
 
-def _timestamp_ms(value: Any) -> int | None:
-    if pd.isna(value):
-        return None
-    if isinstance(value, (int, np.integer)):
-        return int(value)
-    if isinstance(value, (float, np.floating)):
-        return int(value)
-    try:
-        dt = pd.to_datetime(str(value), utc=True)
-        return int(dt.value // 1_000_000)
-    except Exception:
-        return None
 
 
 def _resolve_splits_dir(
@@ -108,12 +101,17 @@ def _load_split_interactions(split_name: str, splits_dir: Path) -> pd.DataFrame:
     if tempo_col is None:
         raise ValueError(f"{path.name} não possui coluna temporal reconhecida.")
     df = df.copy()
-    df["__ts_ms"] = df[tempo_col].apply(_timestamp_ms)
-    if df["__ts_ms"].isna().all():
-        df["__ts_ms"] = np.arange(len(df), dtype=np.int64)
+    df["__ts_ms"] = timestamps_series_to_ms(df[tempo_col])
+    total = len(df)
+    if total > 0 and int(df["__ts_ms"].isna().sum()) == total:
+        raise ValueError(
+            f"{path.name}: coluna '{tempo_col}' tem 100% de timestamps inválidos. "
+            "Re-execute extracao_filtragem/pipeline.py e treinamento/dividir_dataset.py."
+        )
     df["message_id"] = pd.to_numeric(df["message_id"], errors="coerce").astype("Int64")
-    df = df.dropna(subset=["message_id"]).copy()
+    df = df.dropna(subset=["message_id", "__ts_ms"]).copy()
     df["message_id"] = df["message_id"].astype("int64")
+    df["__ts_ms"] = df["__ts_ms"].astype("int64")
     return df
 
 
@@ -186,7 +184,7 @@ def _sample_queries(
                 diagnostics["skipped_without_tags"] += 1
                 continue
 
-            timestamp_ref = _timestamp_ms(ref_row.get("creation_date"))
+            timestamp_ref = timestamp_to_ms(ref_row.get("creation_date"))
             if timestamp_ref is None:
                 timestamp_ref = int(evento["__ts_ms"])
 

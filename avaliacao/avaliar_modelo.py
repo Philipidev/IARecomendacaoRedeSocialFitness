@@ -18,7 +18,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from avaliacao.offline_protocol import (
-    build_future_queries,
+    build_future_queries_with_diagnostics,
     load_split_interactions,
     load_split_strategy,
     parse_tags as parse_tags_offline,
@@ -38,7 +38,7 @@ from treinamento.rankers import load_ranker
 
 RESULTADOS_DIR = ROOT / "avaliacao" / "resultados"
 MS_POR_DIA = 86_400_000
-K_PADRAO = [5, 10, 20]
+K_PADRAO = [5, 10, 20, 100]
 
 
 def _parse_tags(value) -> list[str]:
@@ -226,7 +226,7 @@ def avaliar(
     bootstrap_seed: int = 42,
 ) -> tuple[dict, pd.DataFrame, pd.DataFrame]:
     test_interactions = load_split_interactions(splits_dir, "test")
-    queries = build_future_queries(
+    queries, diagnostico_queries = build_future_queries_with_diagnostics(
         ranker, test_interactions, output_dir, splits_dir=splits_dir
     )
     strategy_info = load_split_strategy(splits_dir)
@@ -370,6 +370,8 @@ def avaliar(
         "model_id": model_id_from_dir(model_dir),
         "family": infer_model_family(model_dir),
         "n_queries_validas": len(linhas_q),
+        "n_queries_candidatas": int(total_queries_candidatas),
+        "diagnostico_construcao_queries": diagnostico_queries,
         "ks": ks,
         "latencia_inferencia_ms_p50": float(np.percentile(latencias_ms, 50)) if latencias_ms else 0.0,
         "latencia_inferencia_ms_p95": float(np.percentile(latencias_ms, 95)) if latencias_ms else 0.0,
@@ -543,7 +545,21 @@ def main() -> None:
     print(f"Modelo avaliado  : {model_dir}")
     print(f"Splits utilizados: {splits_dir}")
     print(f"Output utilizado : {output_dir}")
-    print(f"Consultas avaliadas: {resumo['metadata']['n_queries_validas']}")
+    print(
+        f"Consultas avaliadas: {resumo['metadata']['n_queries_validas']} "
+        f"(candidatas geradas: {resumo['metadata']['n_queries_candidatas']})"
+    )
+    diag = resumo["metadata"].get("diagnostico_construcao_queries") or {}
+    descartes = diag.get("descartes") or {}
+    if resumo["metadata"]["n_queries_validas"] == 0 and descartes:
+        print("[Diagnóstico] Nenhuma query válida foi gerada. Resumo dos descartes:")
+        for chave, valor in descartes.items():
+            if valor:
+                print(f"  - {chave}: {valor}")
+        print(
+            f"  - estratégia: {diag.get('strategy')} | cut_val_test_ms: {diag.get('cut_val_test_ms')} "
+            f"| catálogo: {diag.get('catalog_size')} posts | full_history_rows: {diag.get('full_history_rows')}"
+        )
     print(f"Resultados JSON : {caminho_json}")
     print(f"Resultados CSV  : {caminho_csv}")
     print(f"Resumo Markdown : {caminho_md}")

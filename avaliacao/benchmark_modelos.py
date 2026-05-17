@@ -292,7 +292,23 @@ def _markdown_benchmark(df: pd.DataFrame, best_row: pd.Series) -> str:
         ]
         if col in df.columns
     ]
-    table_md = df[preview_cols].to_markdown(index=False) if not df.empty else "Sem resultados."
+    if df.empty:
+        table_md = "Sem resultados."
+    else:
+        try:
+            table_md = df[preview_cols].to_markdown(index=False)
+        except ImportError:
+            preview = df[preview_cols]
+            header = "| " + " | ".join(str(c) for c in preview_cols) + " |"
+            sep = "| " + " | ".join(["---"] * len(preview_cols)) + " |"
+            linhas = [header, sep]
+            for _, row in preview.iterrows():
+                valores = [
+                    f"{row[c]:.4f}" if isinstance(row[c], float) else str(row[c])
+                    for c in preview_cols
+                ]
+                linhas.append("| " + " | ".join(valores) + " |")
+            table_md = "\n".join(linhas)
     return "\n".join(
         [
             "# Benchmark de Modelos do TCC",

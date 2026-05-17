@@ -48,6 +48,7 @@ from pipeline_contracts import (
     normalize_split_config,
     split_signature,
     timestamp_to_ms,
+    timestamps_series_to_ms,
 )
 
 PROPORCAO_TREINO_PADRAO = 0.70
@@ -143,10 +144,25 @@ def _normalizar_interacoes(interactions: pd.DataFrame) -> tuple[pd.DataFrame, st
         )
 
     df = interactions.copy()
-    df["__ts_ms"] = df[tempo_col].apply(timestamp_to_ms)
-    if df["__ts_ms"].isna().all():
-        df["__ts_ms"] = np.arange(len(df), dtype=np.int64)
-    df["__ts_ms"] = pd.to_numeric(df["__ts_ms"], errors="coerce")
+    df["__ts_ms"] = timestamps_series_to_ms(df[tempo_col])
+    total = len(df)
+    nulos = int(df["__ts_ms"].isna().sum())
+    if nulos == total and total > 0:
+        raise ValueError(
+            "Coluna temporal '"
+            + tempo_col
+            + "' contém apenas valores nulos/inválidos. Não é possível inferir "
+            "a ordem cronológica das interações. "
+            f"Linhas inspecionadas: {total}. "
+            "Re-execute a etapa de extração (extracao_filtragem/pipeline.py) com "
+            "o parser de timestamp corrigido."
+        )
+    if nulos:
+        print(
+            f"[Aviso] {nulos}/{total} interações com timestamp inválido foram "
+            f"descartadas em '{tempo_col}'.",
+            flush=True,
+        )
     df = df.dropna(subset=["__ts_ms"]).copy()
     df["__ts_ms"] = df["__ts_ms"].astype(np.int64)
     df["message_id"] = pd.to_numeric(df["message_id"], errors="coerce").astype("Int64")
