@@ -1,0 +1,91 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>FitConnect — Simulador de Recomendações</title>
+  <link rel="stylesheet" href="/static/style.css" />
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <span class="logo">FC</span>
+      <div>
+        <h1>FitConnect</h1>
+        <p class="subtitle">Simulador de recomendações fitness — TCC</p>
+      </div>
+    </div>
+  </header>
+
+  <main class="container">
+    <section class="card config">
+      <h2>1. Modelo</h2>
+      <p class="hint">Escolha qual modelo treinado você quer usar para gerar as recomendações.</p>
+      <label for="model-select" class="sr-only">Modelo</label>
+      <select id="model-select" disabled>
+        <option>Carregando modelos…</option>
+      </select>
+      <p class="legend">🏆 melhor modelo geral do benchmark · ⭐ melhor modelo no dataset</p>
+      <div id="model-info" class="model-info"></div>
+    </section>
+
+    <section class="card config">
+      <h2>2. Suas tags de interesse</h2>
+      <p class="hint">Selecione as tags que representam seus gostos. As recomendações vão ranquear posts relacionados a elas.</p>
+      <div class="tag-controls">
+        <input
+          type="search"
+          id="tag-search"
+          placeholder="Filtrar tags…"
+          autocomplete="off"
+        />
+        <button id="clear-tags" type="button" class="link-button">Limpar seleção</button>
+      </div>
+      <div id="tags-container" class="tags-container">
+        <p class="placeholder">Selecione um modelo para ver as tags disponíveis.</p>
+      </div>
+      <p id="tags-summary" class="tags-summary"></p>
+    </section>
+
+    <section class="card config">
+      <h2>3. Opções</h2>
+      <div class="options-grid">
+        <label>
+          Quantidade
+          <select id="top-k">
+            <option value="5">Top 5</option>
+            <option value="10">Top 10</option>
+            <option value="20" selected>Top 20</option>
+            <option value="50">Top 50</option>
+          </select>
+        </label>
+        <label>
+          User ID (opcional)
+          <input id="user-id" type="number" placeholder="ex: 123" min="0" />
+        </label>
+        <label class="checkbox">
+          <input id="excluir-exatas" type="checkbox" />
+          Excluir posts com tags idênticas
+        </label>
+      </div>
+      <button id="recommend-btn" type="button" class="primary" disabled>
+        Recomendar
+      </button>
+    </section>
+
+    <section class="card results">
+      <header class="results-header">
+        <h2>Recomendações</h2>
+        <span id="results-meta" class="results-meta"></span>
+      </header>
+      <div id="results-container">
+        <p class="placeholder">As recomendações aparecerão aqui depois que você clicar em <strong>Recomendar</strong>.</p>
+      </div>
+    </section>
+  </main>
+
+  <div id="toast" class="toast" hidden></div>
+
+  <script src="/static/app.js"></script>
+</body>
+</html>
