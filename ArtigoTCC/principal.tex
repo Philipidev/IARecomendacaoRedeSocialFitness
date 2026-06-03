@@ -605,17 +605,8 @@ Final & \texttt{SF30} & \textit{Baseline} padrão & 0,0002 & 0,0004 & Catálogo 
 
 A evolução das rodadas indica um padrão consistente: em menor escala, os experimentos servem principalmente para validar o protocolo, enquanto em escalas maiores torna-se possível distinguir com mais clareza o comportamento de cada família de modelos. Nesse cenário, os \textit{baselines} híbridos mostraram maior estabilidade com o crescimento do catálogo, ao passo que a abordagem de ranqueamento aprendido se mostrou mais dependente de ajuste fino e volume de dados. Tal resultado está em linha com a literatura, que aponta que sinais explícitos do item, como \textit{tags}, popularidade e recência, tendem a escalar bem em catálogos amplos \cite{Lops2011CB}, enquanto modelos de ranqueamento aprendido demandam maior calibração para atingir melhor desempenho \cite{Ke2017LightGBM,Burges2010LTROverview}.
 
-A leitura por dimensão reforça que os modelos apresentam perfis complementares. Os \textit{baselines} híbridos mostraram desempenho mais equilibrado em aspectos diretamente ligados ao uso em produção, como precisão no topo, cobertura e recência, enquanto o LTR se destacou sobretudo em profundidade de recuperação e diversidade. Esses resultados indicam que a escolha do modelo mais adequado depende da dimensão priorizada no sistema.
+A leitura por dimensão reforça que os modelos apresentam perfis complementares. Os \textit{baselines} híbridos mostraram desempenho mais equilibrado em aspectos diretamente ligados ao uso em produção, como precisão no topo, cobertura e recência, enquanto o LTR se destacou sobretudo em profundidade de recuperação e diversidade. Na \texttt{SF3}, o \textit{Baseline} otimizado apresenta o perfil mais equilibrado e o LTR lidera em profundidade de ranqueamento; na \texttt{SF30}, os \textit{baselines} híbridos concentram o desempenho mais consistente, sugerindo maior robustez em catálogos maiores. Em todos os casos, a escolha do modelo mais adequado depende da dimensão priorizada no sistema.
 
-A Figura \ref{fig:radar_modelos} resume visualmente o perfil multidimensional dos modelos. Nas dimensões de \textit{recência} e \textit{latência}, a escala foi invertida para que valores mais externos representem melhor desempenho. Em geral, polígonos mais regulares indicam maior equilíbrio entre as dimensões, enquanto formas mais concentradas revelam especialização. Na \texttt{SF3}, o \textit{Baseline} otimizado apresenta o perfil mais equilibrado, enquanto o LTR se destaca em profundidade de ranqueamento. Na \texttt{SF30}, os \textit{baselines} híbridos passam a concentrar o desempenho mais consistente entre as dimensões analisadas, sugerindo maior robustez em catálogos maiores.
-
-\begin{figure}[H]
-\centering
-\caption{Perfil comparativo dos modelos por dimensão, normalizado dentro de cada rodada}
-\label{fig:radar_modelos}
-\includegraphics[width=\textwidth]{figuras/radar_modelos.pdf}
-\small \\ Fonte: Elaborado pelos autores.
-\end{figure}
 
 \subsection{Contextualização dos valores absolutos}
 
@@ -627,7 +618,7 @@ Como limitação atual do protocolo, a versão personalizada da trilha LTR, base
 
 \subsection{Síntese dos achados}
 
-A consolidação das três rodadas confirma que cada família de modelos tem um ponto forte distinto e complementar: a Popularidade cumpre o papel de referência mínima, sendo superada quando há volume suficiente de consultas; o \textit{baseline} padrão lidera em cobertura de catálogo; o \textit{baseline} otimizado se destaca em precisão no topo e recência, relevante no domínio \textit{fitness}; e o LTR (\textit{LightGBMRanker}) sobressai em profundidade de recuperação e diversidade. Não há, portanto, um modelo dominante: como evidencia o radar comparativo (Figura \ref{fig:radar_modelos}), a escolha para produção depende do critério priorizado pelo negócio (latência, engajamento em conteúdo recente ou descoberta diversificada).
+A consolidação das três rodadas confirma que cada família de modelos tem um ponto forte distinto e complementar: a Popularidade cumpre o papel de referência mínima, sendo superada quando há volume suficiente de consultas; o \textit{baseline} padrão lidera em cobertura de catálogo; o \textit{baseline} otimizado se destaca em precisão no topo e recência, relevante no domínio \textit{fitness}; e o LTR (\textit{LightGBMRanker}) sobressai em profundidade de recuperação e diversidade. Não há, portanto, um modelo dominante: a escolha para produção depende do critério priorizado pelo negócio (latência, engajamento em conteúdo recente ou descoberta diversificada).
 
 O volume de dados, por sua vez, é determinante para a comparação: a \texttt{SF0.1} apenas valida o protocolo, a \texttt{SF3} já distingue os modelos e a \texttt{SF30} reduz o NDCG@10 absoluto pela maior dificuldade da tarefa, tornando o NDCG@100 a métrica mais informativa em escala.
 
