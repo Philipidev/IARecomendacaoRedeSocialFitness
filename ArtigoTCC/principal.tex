@@ -101,17 +101,17 @@ This work presents the development and evaluation of a recommender system aimed 
 \section{Introdução}
 A prática insuficiente de atividade física permanece um desafio relevante de saúde pública no Brasil, contribuindo para o aumento de doenças crônicas não transmissíveis. Dados do \citeonline{Vigitel2023} indicam que os níveis de atividade física observados nas capitais brasileiras ainda demandam políticas e estratégias capazes de reduzir o sedentarismo e ampliar a adoção de rotinas ativas. Em paralelo, a Organização Mundial da Saúde recomenda, para adultos, entre 150 e 300 minutos semanais de atividade aeróbica moderada, parâmetro que ainda não é alcançado por parcela expressiva da população \cite{WHO2020}.
 
-Nesse cenário, intervenções digitais voltadas ao acompanhamento e ao estímulo da atividade física vêm recebendo atenção crescente, sobretudo quando buscam adaptar conteúdos ao contexto do usuário \cite{Agans2025PARecommender,Venka2022CARS}. Contudo, a simples disponibilização de conteúdos em plataformas digitais não garante que cada pessoa receba informações compatíveis com seus interesses, seu momento de uso e sua realidade social.
+Nesse cenário, intervenções digitais voltadas ao estímulo da atividade física vêm recebendo atenção crescente, sobretudo quando adaptam conteúdos ao contexto do usuário \cite{Agans2025PARecommender,Venka2022CARS}. Contudo, a simples disponibilização de conteúdos não garante que cada pessoa receba informações compatíveis com seus interesses, seu momento de uso e sua realidade social.
 
-Em ambientes com grande volume de itens e interações, essa adaptação depende de mecanismos capazes de selecionar e ordenar conteúdos segundo critérios de relevância \cite{10.1145/3285029}. É nesse ponto que se inserem os sistemas de recomendação, entendidos neste trabalho como mecanismos computacionais voltados à seleção e ao ranqueamento de itens potencialmente mais relevantes para cada usuário.
-
-Em serviços digitais, esses sistemas exercem papel estratégico na organização da informação \cite{GomezUribe2016Netflix}. No domínio da atividade física, sua utilidade tende a crescer quando também consideram sinais sociais, uma vez que interações entre pares podem influenciar comportamento e engajamento \cite{Franken2023}.
+Em ambientes com grande volume de itens e interações, essa adaptação depende de mecanismos capazes de selecionar e ordenar conteúdos por relevância \cite{10.1145/3285029}. É nesse ponto que se inserem os sistemas de recomendação, que exercem papel estratégico na organização da informação em serviços digitais \cite{GomezUribe2016Netflix}. No domínio da atividade física, sua utilidade cresce quando também consideram sinais sociais, já que interações entre pares podem influenciar comportamento e engajamento \cite{Franken2023}.
 
 Diante desse problema, este trabalho propõe o desenvolvimento e a avaliação de um sistema de recomendação para uma rede social voltada à atividade física. O estudo utiliza dados extraídos do LDBC SNB \cite{Angles2020LDBCSNB} e organiza um fluxo com as etapas de coleta, preparação, treinamento, validação e avaliação dos modelos. Como contribuição técnica, foi desenvolvido o aplicativo FitConnect, que serve como ambiente de interação e estudo de caso para a coleta de sinais e experimentações. Desse modo, o problema investigado neste trabalho não se limita à oferta de conteúdo, mas à construção de um processo de ordenação que articule conteúdo, contexto temporal e relações sociais.
 
 A solução investigada é construída em etapas. Primeiramente, o sistema combina similaridade de conteúdo, coocorrência de marcadores temáticos (\textit{tags}), recência, popularidade e informação do grafo social em um modelo híbrido de referência, onde cada sinal possui um peso interpretável. Em complemento, o trabalho incorpora uma trilha de aprendizado para ranqueamento (\textit{Learning to Rank}), permitindo que a importância de cada um desses sinais seja aprendida automaticamente a partir dos dados. A contribuição central do trabalho consiste em estruturar e comparar, em um mesmo ambiente experimental, essas diferentes abordagens de recomendação para apoiar a personalização de conteúdos sobre atividade física.
 
 O restante do trabalho está organizado da seguinte forma: a Seção 2 apresenta a fundamentação teórica sobre inteligência artificial, sistemas de recomendação e métricas de avaliação; a Seção 3 discute os trabalhos correlatos; a Seção 4 descreve a metodologia adotada, com destaque para materiais e método; a Seção 5 apresenta os experimentos e resultados; e, por fim, a Seção 6 apresenta a conclusão do trabalho.
+
+
 
 
 
@@ -136,19 +136,12 @@ Quando essas abordagens são utilizadas em conjunto, formam-se os modelos híbri
 
 \subsection{Sinais de ranqueamento}
 
-Como a recomendação não depende de um único critério de relevância, múltiplos sinais podem ser utilizados para ordenar os candidatos. A combinação desses sinais forma a base de modelos híbridos e de algoritmos de aprendizado \cite{10.1145/3285029}.
+Como a recomendação não depende de um único critério de relevância, múltiplos sinais podem ser combinados para ordenar os candidatos, formando a base de modelos híbridos e de algoritmos de aprendizado \cite{10.1145/3285029}. Três deles derivam diretamente do conteúdo e do tempo: a \textbf{similaridade de conteúdo}, que mede a proximidade temática entre itens com marcadores semelhantes \cite{Lops2011CB}; a \textbf{coocorrência de \textit{tags}}, que explora a frequência com que marcadores aparecem juntos para recuperar conteúdos relacionados além da coincidência exata; e a \textbf{recência}, sinal temporal que, por meio de decaimento, favorece itens mais próximos do momento da consulta \cite{Koren2009Temporal}.
 
-Similaridade de conteúdo é o grau de proximidade temática entre dois itens. Quando dois \textit{posts} compartilham marcadores semânticos semelhantes, entende-se que tratam de assuntos próximos, o que aumenta a chance de um deles ser relevante para quem demonstrou interesse no outro \cite{Lops2011CB}.
-
-Coocorrência de \textit{tags} corresponde à frequência com que determinados marcadores aparecem juntos em um mesmo conjunto de dados. Quando duas \textit{tags} surgem repetidamente associadas nas publicações, essa relação pode ser explorada como indício de proximidade temática ou comportamental. Assim, a coocorrência amplia a recomendação para além da coincidência exata de marcadores, permitindo recuperar conteúdos relacionados.
-
-Recência é o sinal temporal que favorece itens mais recentes ou mais próximos do momento de referência da consulta. Em plataformas dinâmicas, a relevância de um conteúdo não depende apenas do tema, mas também de sua posição no tempo. Por isso, modelos de recomendação frequentemente incorporam mecanismos de decaimento temporal para reduzir o peso de conteúdos muito antigos em relação ao contexto atual \cite{Koren2009Temporal}.
-
-Popularidade representa o interesse coletivo acumulado em torno de um item ou de um grupo de itens. Em termos práticos, ela pode ser estimada por volume de interações, frequência de acesso ou intensidade de engajamento. Esse sinal funciona como evidência complementar de relevância, especialmente útil quando se deseja considerar o comportamento agregado da comunidade \cite{Covington2016YouTube}.
-
-Por fim, a influência do grafo social é a representação das relações entre usuários na forma de nós e conexões. Quando esse tipo de estrutura é incorporado à recomendação, torna-se possível considerar não apenas o conteúdo consumido, mas também a posição social de quem interage com ele. Em redes sociais voltadas à atividade física, interações entre pares podem influenciar engajamento e comportamento, o que justifica o uso de sinais associados à estrutura social no processo de ranqueamento \cite{Franken2023}.
+Outros dois sinais capturam o comportamento coletivo e a estrutura da rede: a \textbf{popularidade}, que reflete o interesse acumulado em torno de um item (volume de interações, acesso ou engajamento) \cite{Covington2016YouTube}, e a \textbf{influência do grafo social}, que considera a posição social de quem interage com o conteúdo, relevante em redes voltadas à atividade física, nas quais a interação entre pares afeta o engajamento \cite{Franken2023}.
 
 Em um modelo híbrido de referência explicável, o \textit{score} final do item pode ser entendido como uma combinação ponderada desses componentes:
+
 
 \begin{equation}
 \label{eq:score_hibrido}
@@ -165,7 +158,7 @@ Diferentemente de um modelo com pesos definidos manualmente, o \textit{Learning 
 
 O \textit{LightGBMRanker} é um algoritmo específico utilizado em tarefas de ranqueamento, baseado em árvores de decisão com aumento de gradiente (\textit{Gradient Boosting Decision Trees}). Ele é projetado para otimizar métricas de ordenação de forma eficiente, permitindo que a importância relativa de diversos atributos seja aprendida diretamente a partir dos dados de treinamento \cite{Ke2017LightGBM}.
 
-Em tarefas de ranqueamento, a avaliação precisa considerar não apenas se um item relevante foi recuperado, mas também a posição em que ele aparece na lista. Por essa razão, métricas de ordenação são particularmente importantes na análise de sistemas de recomendação. A \textit{Normalized Discounted Cumulative Gain} (\textit{NDCG}) permite avaliar se os itens mais relevantes estão concentrados nas primeiras posições da lista \cite{Jarvelin2002NDCG}. Ela atribui pesos maiores aos acertos no topo da lista e penaliza acertos em posições inferiores. Já a \textit{Mean Reciprocal Rank} (\textit{MRR}) enfatiza quão cedo surge o primeiro item relevante para cada consulta \cite{Craswell2009MRR}, sendo calculada pelo inverso da posição do primeiro acerto. Ambas as métricas são fundamentais para mensurar a eficácia de algoritmos de ranqueamento, especialmente em cenários onde a atenção do usuário é limitada aos primeiros resultados.
+Em tarefas de ranqueamento, a avaliação precisa considerar não apenas se um item relevante foi recuperado, mas também a posição em que ele aparece na lista. Por essa razão, métricas de ordenação como a \textit{Normalized Discounted Cumulative Gain} (\textit{NDCG}) \cite{Jarvelin2002NDCG} e a \textit{Mean Reciprocal Rank} (\textit{MRR}) \cite{Craswell2009MRR} são especialmente importantes na análise de sistemas de recomendação, sobretudo em cenários nos quais a atenção do usuário se concentra nos primeiros resultados. Suas definições operacionais, junto às demais métricas adotadas, são detalhadas na Seção 5.
 
 
 
@@ -173,15 +166,11 @@ Em tarefas de ranqueamento, a avaliação precisa considerar não apenas se um i
 \section{Trabalhos Correlatos}
 
 
-Em plataformas digitais de grande escala, os sistemas de recomendação deixaram de ser um recurso complementar e passaram a ocupar posição central na interação com o usuário \cite{10.1145/3285029}. \citeonline{GomezUribe2016Netflix} mostram, no caso da Netflix, que a recomendação está diretamente associada à organização personalizada do catálogo, ao engajamento de médio prazo e à retenção dos usuários, sendo continuamente aprimorada por meio de testes A/B e de dados históricos de interação.
+Em plataformas digitais de grande escala, os sistemas de recomendação ocupam posição central na interação com o usuário \cite{10.1145/3285029}. No caso da Netflix, \citeonline{GomezUribe2016Netflix} mostram que a recomendação está diretamente associada à personalização do catálogo, ao engajamento e à retenção, sendo continuamente aprimorada por testes A/B e dados históricos.
 
-No domínio de sistemas de recomendação aplicados à atividade física, \citeonline{Venka2022CARS} apresentam uma revisão sobre algoritmos de Inteligência Artificial sensíveis ao contexto em recomendadores para \textit{fitness}. Os autores mostram que fatores como preferências individuais, contexto de uso e dados comportamentais podem ampliar a pertinência das recomendações, ao mesmo tempo em que evidenciam a necessidade de soluções mais bem adaptadas a cenários reais de uso.
+No domínio \textit{fitness}, \citeonline{Venka2022CARS} revisam algoritmos sensíveis ao contexto e mostram que preferências individuais, contexto de uso e dados comportamentais ampliam a pertinência das recomendações. De forma mais aplicada, \citeonline{Zhao2020PersonalizedFitness} propõem um sistema de assistência fitness com modelagem dinâmica de usuários e, em estudo com 40 participantes por 60 dias, observaram ganhos significativos de motivação ao combinar personalização e gamificação. Já \citeonline{Agans2025PARecommender} investigam recomendação de atividades para jovens inativos com maior peso corporal, constatando disposição de cerca de metade dos participantes em adotar as sugestões.
 
-Já \citeonline{Zhao2020PersonalizedFitness} propõem um sistema de assistência fitness que fornece recomendações personalizadas de atividades físicas, a partir de modelagem dinâmica de usuários. No estudo, os autores acompanharam 40 participantes por 60 dias e observaram diferenças estatisticamente significativas em motivação e preferência entre os grupos avaliados, indicando que a combinação entre personalização e gamificação pode contribuir positivamente para o engajamento em atividades físicas. Esse correlato mostra, de forma mais direta, como um sistema de recomendação pode atuar no domínio do fitness.
-
-Também em direção semelhante, \citeonline{Agans2025PARecommender} investigam o uso de tecnologia de recomendação para apoiar a adoção de atividade física entre jovens inativos com maior peso corporal. O estudo desenvolveu um sistema capaz de sugerir atividades com base em dados populacionais e avaliou o interesse dos participantes em utilizar esse tipo de recomendação. Os resultados indicaram que aproximadamente metade dos participantes demonstrou disposição para utilizar o sistema, e parte daqueles que receberam sugestões, efetivamente experimentou as atividades recomendadas. O trabalho reforça o potencial de sistemas de recomendação para apoiar a descoberta de práticas físicas mais compatíveis com perfis e preferências individuais.
-
-Em redes sociais, a recomendação também pode explorar explicitamente a estrutura relacional entre usuários. \citeonline{10457840} propõem um método de recomendação de participantes em redes sociais baseadas em eventos, considerando aspectos de relevância e equidade na ordenação. Embora o problema tratado seja distinto do presente trabalho, o estudo é pertinente por mostrar como informações de rede e de contexto social podem ser incorporadas ao processo de recomendação.
+Em redes sociais, a recomendação também explora a estrutura relacional entre usuários. \citeonline{10457840} propõem um método de recomendação de participantes em redes baseadas em eventos, considerando relevância e equidade na ordenação; embora trate de problema distinto, é pertinente por mostrar como informações de rede e contexto social podem ser incorporadas ao ranqueamento.
 
 Em conjunto, esses trabalhos mostram que a literatura já reconhece a importância da personalização, do contexto e das relações sociais em sistemas de recomendação. A proposta desenvolvida neste trabalho, aproxima-se dessa linha ao tratar a recomendação como núcleo técnico do sistema, mas se diferencia por direcionar o problema para a ordenação de conteúdo sobre atividade física em rede social, explorando sinais de conteúdo, coocorrência, recência, popularidade e grafo social em um mesmo ambiente experimental. Além disso, o trabalho compara um modelo híbrido de referência com uma trilha de aprendizado para ranqueamento, o que amplia a análise para além de uma única estratégia de recomendação.
 
@@ -201,11 +190,11 @@ Para a construção do modelo híbrido de referência, utilizou-se a biblioteca 
 Como materiais intermediários do estudo, foram produzidos artefatos derivados da base inicial e os conjuntos de treino, validação e teste. Esses arquivos compõem a base efetiva sobre a qual os modelos são treinados e avaliados. Entre os principais artefatos, destacam-se:
 
 \begin{itemize}
-    \item[a)] \texttt{messages\_fitness.parquet}: contém os metadados de todas as publicações e comentários filtrados para o domínio fitness, incluindo data de criação, tamanho do texto e \textit{tags} associadas.
-    \item[b)] \texttt{interactions\_fitness.parquet}: registra as ações dos usuários sobre os conteúdos, como curtidas, criação de posts e respostas, essenciais para inferir preferências.
-    \item[c)] \texttt{tag\_cooccurrence.parquet}: armazena a frequência com que pares de \textit{tags} aparecem juntos nas publicações, servindo de base para o cálculo de similaridade semântica.
-    \item[d)] \texttt{posts\_metadata.parquet}: versão consolidada dos dados dos posts, preparada especificamente para a etapa de treinamento dos modelos.
-    \item[e)] \texttt{user\_tag\_profile.parquet}: representa o perfil de interesse de cada usuário, construído a partir de suas interações históricas com diferentes \textit{tags}.
+    \item[a)] \texttt{messages\_fitness.parquet}: metadados das publicações e comentários \textit{fitness} (data de criação, tamanho do texto e \textit{tags}).
+    \item[b)] \texttt{interactions\_fitness.parquet}: ações dos usuários (curtidas, criação de posts e respostas), usadas para inferir preferências.
+    \item[c)] \texttt{tag\_cooccurrence.parquet}: frequência de pares de \textit{tags} que aparecem juntos, base para a similaridade semântica.
+    \item[d)] \texttt{posts\_metadata.parquet}: versão consolidada dos posts, preparada para o treinamento.
+    \item[e)] \texttt{user\_tag\_profile.parquet}: perfil de interesse de cada usuário, derivado de suas interações históricas com \textit{tags}.
 \end{itemize}
 
 Além disso, o processo experimental foi organizado por um orquestrador e por configurações parametrizáveis, que permitiram controlar hiperparâmetros de treinamento, famílias de modelos, etapas de avaliação e diretórios de saída, assegurando a padronização e a reprodutibilidade dos experimentos
@@ -504,7 +493,7 @@ Além das métricas de ranqueamento, a avaliação incluiu medidas de interesse 
 
 \subsection{Resultados da versão inicial (SF0.1)}
 
-Os resultados da primeira rodada, executada na versão \texttt{SF0.1}, estão sintetizados na Tabela \ref{tab:resultados_sf01}. Essa rodada funcionou como uma validação inicial do protocolo experimental, operando sobre uma amostra muito reduzida de dados, apenas 6 consultas elegíveis após o corte temporal.
+Os resultados da primeira rodada, na versão \texttt{SF0.1}, estão sintetizados na Tabela \ref{tab:resultados_sf01} e funcionaram como validação técnica do protocolo, operando sobre uma amostra muito reduzida (apenas 6 consultas elegíveis após o corte temporal).
 
 \begin{table}[H]
 \centering
@@ -526,7 +515,7 @@ LTR (\textit{LightGBMRanker}) & 0,0000 & 0,1732 & \textbf{1,000} & 0,690 & 345 &
 \end{tabular}
 \end{table}
 
-Na rodada \texttt{SF0.1}, com 381 interações distribuídas entre 55 usuários, poucos casos apresentam histórico antes e depois do corte temporal. Por isso, o NDCG@10 foi nulo em todos os modelos, já que o volume de dados é insuficiente para avaliar a recuperação exata no top 10. Em contrapartida, o NDCG@100 mostra que os modelos de Popularidade e LTR recuperaram 100\% dos itens-alvo entre os 100 primeiros. Assim, essa versão foi empregada principalmente como validação técnica do fluxo experimental, enquanto os resultados mais consistentes são discutidos nas rodadas \texttt{SF3} e \texttt{SF30}.
+Com apenas 381 interações entre 55 usuários, poucos casos têm histórico antes e depois do corte, e o NDCG@10 foi nulo em todos os modelos por insuficiência de massa; ainda assim, o NDCG@100 indica que Popularidade e LTR recuperaram 100\% dos itens-alvo entre os 100 primeiros. Os resultados mais consistentes são discutidos nas rodadas \texttt{SF3} e \texttt{SF30}.
 
 \subsection{Resultados da versão intermediária (SF3)}
 
@@ -630,31 +619,20 @@ A Figura \ref{fig:radar_modelos} resume visualmente o perfil multidimensional do
 
 \subsection{Contextualização dos valores absolutos}
 
-Os valores absolutos de NDCG@10 observados neste estudo podem parecer baixos quando analisados isoladamente, mas sua interpretação exige considerar o protocolo adotado e as características da base utilizada.
+Os valores absolutos de NDCG@10 observados neste estudo podem parecer baixos quando analisados isoladamente, mas são esperados em razão do rigor do gabarito e do tamanho do catálogo. Em sistemas comerciais, o NDCG costuma adotar uma definição ampla de relevância, na qual qualquer item da mesma categoria conta como acerto, com valores tipicamente entre 0,05 e 0,30 \cite{Covington2016YouTube,GomezUribe2016Netflix}. Neste trabalho, porém, a recomendação só é correta quando recupera exatamente o próximo \textit{post} acessado pelo usuário entre dezenas de milhares de candidatos; sob protocolos igualmente estritos, a literatura acadêmica reporta valores entre 0,001 e 0,02 \cite{Jarvelin2002NDCG,Burges2010LTROverview}, faixa na qual se inserem os resultados obtidos.
 
-Em primeiro lugar, deve-se considerar o rigor do gabarito adotado. Em sistemas de recomendação comerciais, o NDCG costuma ser calculado com uma definição mais ampla de relevância, na qual qualquer item da mesma categoria, pode ser contabilizado como acerto. Nesses contextos, valores de NDCG@10 reportados na literatura costumam situar-se entre 0,05 e 0,30, como nos casos do YouTube \cite{Covington2016YouTube} e da Netflix \cite{GomezUribe2016Netflix}. 
-
-Neste trabalho, porém, foi adotado um critério mais estrito: a recomendação só é considerada correta quando recupera exatamente o próximo \textit{post} acessado pelo usuário no conjunto de teste, entre dezenas de milhares de candidatos. Sob esse tipo de protocolo, a literatura acadêmica reporta valores tipicamente mais baixos, em geral entre 0,001 e 0,02 \cite{Jarvelin2002NDCG,Burges2010LTROverview}, faixa na qual se inserem os resultados obtidos neste estudo.
-
-Segundo, o tamanho do catálog. Na \texttt{SF30}, há 77.105 \textit{posts} candidatos por consulta. A probabilidade aleatória de acertar o item correto entre os 10 primeiros recomendados é de apenas \(10/77.105 \approx 0{,}013\%\). O \textit{Baseline} padrão atinge NDCG@10 = 0,0002 nessa rodada, valor cerca de 1,5 vezes acima do piso aleatório esperado para uma lista de 10 itens nesse catálogo. Quando o catálogo é menor, como na \texttt{SF3}, o piso aleatório é proporcionalmente maior e os modelos atingem valores absolutos maiores, por isso o \textit{Baseline} otimizado atinge NDCG@10 = 0,0023 nessa rodada, dez vezes acima do valor da \texttt{SF30}.
-
-Terceiro, o caráter sintético da base. O \textit{LDBC SNB} é uma base simulada cujo conteúdo textual dos \textit{posts} é gerado de forma aleatória, e cujas tags fitness representam uma fatia pequena do universo geral da rede. Em redes sociais reais, sinais como tendências virais, formação de comunidades e conteúdo textual, oferecem ao recomendador mais informação para discriminar candidatos, algo que a base simulada não fornece.
-
-Em síntese, os valores absolutos baixos não indicam falha técnica do estudo; ao contrário, são esperados para o protocolo escolhido e para a natureza da base. O valor científico do trabalho está na comparação relativa entre modelos sob o mesmo protocolo, na análise das suas trocas, como precisão no topo \textit{vs.} cobertura \textit{vs.} recência \textit{vs.} latência, e na verificação de que modelos mais sofisticados conseguem superar a heurística trivial de popularidade.
+O tamanho do catálogo reforça essa leitura. Na \texttt{SF30}, com 77.105 \textit{posts} candidatos, a probabilidade aleatória de acertar o item entre os 10 primeiros é de apenas \(10/77.105 \approx 0{,}013\%\); o \textit{Baseline} padrão atinge NDCG@10 = 0,0002, cerca de 1,5 vez acima desse piso. Em catálogos menores, como na \texttt{SF3}, o piso aleatório é maior e os modelos alcançam valores absolutos mais altos, o que explica o NDCG@10 = 0,0023 do \textit{Baseline} otimizado. Assim, o valor científico do trabalho está na comparação relativa entre modelos sob o mesmo protocolo e na análise de suas trocas (precisão no topo \textit{vs.} cobertura \textit{vs.} recência \textit{vs.} latência), confirmando que modelos mais sofisticados superam a heurística trivial de popularidade.
 
 Como limitação atual do protocolo, a versão personalizada da trilha LTR, baseada explicitamente na identidade do usuário durante a ordenação, ainda não integra estas rodadas. Assim, a comparação atual permanece concentrada nos \textit{baselines} híbridos e na variante LTR descrita na Etapa~3.
 
 \subsection{Síntese dos achados}
 
-A consolidação dos resultados ao longo das três rodadas permite extrair quatro observações principais sobre o comportamento comparado dos modelos do estudo.
+A consolidação das três rodadas confirma que cada família de modelos tem um ponto forte distinto e complementar: a Popularidade cumpre o papel de referência mínima, sendo superada quando há volume suficiente de consultas; o \textit{baseline} padrão lidera em cobertura de catálogo; o \textit{baseline} otimizado se destaca em precisão no topo e recência, relevante no domínio \textit{fitness}; e o LTR (\textit{LightGBMRanker}) sobressai em profundidade de recuperação e diversidade. Não há, portanto, um modelo dominante: como evidencia o radar comparativo (Figura \ref{fig:radar_modelos}), a escolha para produção depende do critério priorizado pelo negócio (latência, engajamento em conteúdo recente ou descoberta diversificada).
 
-Em primeiro lugar, cada família de modelos apresentou um ponto forte distinto. O modelo de Popularidade cumpriu seu papel como referência mínima do \textit{benchmark}, sendo superado nas rodadas com volume suficiente de consultas, o que indica que os modelos mais elaborados conseguem extrair valor adicional dos sinais empregados. O \textit{baseline} padrão destacou-se pela ampla cobertura do catálogo, aspecto relevante para reduzir viés de exposição em uma rede social. O \textit{baseline} otimizado mostrou melhor desempenho em precisão no topo e maior capacidade de priorizar conteúdos recentes, característica especialmente importante no domínio \textit{fitness}. Já o LTR (\textit{LightGBMRanker}) se sobressaiu na recuperação em maior profundidade e na diversidade intra-lista, sugerindo maior capacidade de captar padrões temáticos que não são explorados pelos \textit{baselines}.
-
-Em segundo lugar, a escolha do modelo para produção depende do critério de otimização do negócio. Para um cenário em que latência é crítica e o conteúdo do feed pode ser homogêneo, o \textit{baseline} de Popularidade resolve com baixíssimo custo computacional. Para um \textit{feed} que privilegie engajamento em conteúdo recente, o \textit{Baseline} otimizado é a escolha natural. Para um cenário que privilegie descoberta diversificada, o LTR oferece o melhor compromisso. Não há um único modelo dominante: o radar comparativo (Figura \ref{fig:radar_modelos}) deixa claro que a escolha precisa ser feita em função das prioridades do produto.
-
-Em terceiro lugar, o volume de dados é determinante para a comparação relativa entre modelos. Na \texttt{SF0.1}, o NDCG@10 zera em todos os modelos e nada se pode concluir sobre desempenho relativo. Já na \texttt{SF3} o cenário se torna efetivamente comparativo, com o \textit{Baseline} otimizado superando a Popularidade. Na \texttt{SF30} o NDCG@10 cai em escala absoluta, não por piora dos modelos, mas pelo aumento natural da dificuldade da tarefa em catálogos dez vezes maiores, e o NDCG@100 passa a ser a métrica mais informativa.
+O volume de dados, por sua vez, é determinante para a comparação: a \texttt{SF0.1} apenas valida o protocolo, a \texttt{SF3} já distingue os modelos e a \texttt{SF30} reduz o NDCG@10 absoluto pela maior dificuldade da tarefa, tornando o NDCG@100 a métrica mais informativa em escala.
 
 Por fim, três limitações devem ser destacadas. A primeira é o uso de um critério estrito de avaliação, baseado na próxima interação exata, ao passo que sistemas comerciais costumam adotar janelas de relevância mais amplas e, por isso, tendem a apresentar valores absolutos de NDCG mais altos. A segunda é o caráter sintético da base \textit{LDBC SNB}, cujo conteúdo textual é gerado aleatoriamente, limitando o uso de \textit{embeddings} ao nome das \textit{tags}. A terceira é a ausência de avaliação \textit{online} com usuários reais.
+
 
 \section{CONCLUSÃO}
 
