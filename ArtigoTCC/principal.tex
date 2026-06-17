@@ -454,11 +454,11 @@ Por fim, um orquestrador foi utilizado para organizar os experimentos em termos 
 
 A avaliação em modo \textit{offline} é feita com dados que separamos previamente, em vez de testar com usuários reais. A vantagem é poder comparar os modelos de forma justa, todos nas mesmas condições, e repetir o experimento quantas vezes for preciso.
 
-A ideia central é simples: escolhemos um instante na linha do tempo de cada usuário e dividimos o histórico dele em duas partes, o que ele já tinha acessado antes daquele instante e o que viria a acessar depois. O modelo recebe apenas a parte de antes (as \textit{tags} e o horário da atividade mais recente do usuário) e, com isso, monta uma lista de recomendações a partir de todo o catálogo. Em seguida, comparamos essa lista com a parte de depois, que funciona como gabarito, quanto mais itens da lista o usuário realmente acessou depois, melhor o modelo. Para que o teste seja justo, o modelo nunca enxerga o futuro, e itens que o usuário já tinha visto são retirados da lista.
+A ideia central é simples, escolhemos um instante na linha do tempo de cada usuário e dividimos o histórico dele em duas partes, o que ele já tinha acessado antes e o que viria a acessar depois. O modelo recebe apenas a parte de antes, que são as \textit{tags} e o horário da atividade mais recente, e com isso, monta uma lista de recomendações a partir de todo o catálogo. Em seguida, comparamos essa lista com a parte futura, que funciona como gabarito, quanto mais itens da lista o usuário realmente acessou depois, melhor o modelo. Para que o teste seja justo, o modelo nunca enxerga o futuro, e itens que o usuário já tinha visto são retirados da lista.
 
-Nem todo usuário entra nessa conta, só é possível avaliar quem tem atividade antes e depois do instante escolhido, uma para servir de base e outra para conferir o acerto. Por isso o número de consultas avaliadas muda conforme a versão da base. Como medida de relevância, contamos como acerto o item que o usuário de fato acessou depois. É uma aproximação prática e amplamente adotada na avaliação \textit{offline} de recomendadores \cite{10.1145/963770.963772}, mas que não capta tudo, por exemplo, se a pessoa gostou da recomendação ou descobriu algo novo por acaso. Medir isso exigiria testes com usuários reais (avaliação \textit{online}), o que fica como trabalho futuro.
+Nem todo usuário entra nessa conta, só é possível avaliar quem tem atividade antes e depois do instante escolhido. Por isso, o número de consultas avaliadas muda conforme a versão da base. Como medida de relevância, contamos como acerto o item que o usuário de fato acessou depois. É uma aproximação prática e amplamente adotada na avaliação \textit{offline} de modelos de recomendações \cite{10.1145/963770.963772}, mas não capta tudo, por exemplo, se a pessoa gostou da recomendação ou descobriu algo novo depois. Medir isso exigiria testes com usuários reais, avaliação \textit{online}, o que fica como trabalho futuro.
 
-A Figura \ref{fig:fluxo_avaliacao} resume esse fluxo: agrupar as interações por usuário, ordená-las no tempo, separar a referência do gabarito, gerar o Top-K e calcular as métricas.
+A Figura \ref{fig:fluxo_avaliacao} resume o fluxo de agrupar as interações por usuário, ordená-las no tempo, separar a referência do gabarito, gerar o Top-K e calcular as métricas.
 
 \textcolor{red}{... não ficou legal}
 
@@ -474,15 +474,15 @@ A Figura \ref{fig:fluxo_avaliacao} resume esse fluxo: agrupar as interações po
 ]
 
 % Linha de cima (esquerda -> direita)
-\node[iobox] (entrada) {Conjunto de teste (interações do split)};
+\node[iobox] (entrada) {Conjunto de teste};
 \node[box, right=of entrada] (grupo) {Agrupar interações por usuário};
 \node[box, right=of grupo] (ordena) {Ordenar interações cronologicamente};
-\node[box, right=of ordena] (ref) {Definir referência: última antes do corte};
+\node[box, right=of ordena] (ref) {Define a referência};
 
 % Linha de baixo (direita -> esquerda)
-\node[box, below=of ref] (gab) {Definir gabarito: interações posteriores};
-\node[box, left=of gab] (topk) {Modelo gera Top-K (\textit{tags} + tempo)};
-\node[box, left=of topk] (metricas) {Calcular NDCG@K, MRR@K, Recall@K, $\dots$};
+\node[box, below=of ref] (gab) {Define o gabarito};
+\node[box, left=of gab] (topk) {Modelo gera Top-K recomendações};
+\node[box, left=of topk] (metricas) {Calcular NDCG@K, Recall@K, $\dots$};
 \node[iobox, left=of metricas] (saida) {Média das métricas sobre as consultas};
 
 \draw[arrow] (entrada) -- (grupo);
@@ -497,31 +497,27 @@ A Figura \ref{fig:fluxo_avaliacao} resume esse fluxo: agrupar as interações po
 \small \\ Fonte: Elaborado pelos autores.
 \end{figure}
 
-Para mensurar a qualidade do ranqueamento, foram adotadas métricas que consideram tanto a presença de itens relevantes quanto sua posição na lista recomendada. São elas:
+Para mensurar a qualidade do ranqueamento, foram adotadas métricas que consideram tanto a presença de itens relevantes quanto sua posição na lista recomendada, com de profundidades K = 10 e K = 100. São elas:
 
 \begin{itemize}
-    \item[a)] \textit{Precision@K} mede a proporção de itens relevantes entre os K primeiros recomendados.
+    \item[a)] \textit{NDCG@K}, ou ganho acumulado descontado normalizado, valoriza mais os itens relevantes que aparecem nas primeiras posições da lista.
     \item[b)] \textit{Recall@K} mede a proporção dos itens relevantes que foi recuperada entre os K primeiros resultados.
-    \item[c)] \textit{HitRate@K} verifica se ao menos um item relevante aparece entre os K primeiros recomendados.
-    \item[d)] \textit{MAP@K}, ou precisão média em K, resume a precisão acumulada nas posições em que ocorrem acertos.
-    \item[e)] \textit{NDCG@K}, ou ganho acumulado descontado normalizado, valoriza mais os itens relevantes que aparecem nas primeiras posições da lista.
-    \item[f)] \textit{MRR@K}, ou posto recíproco médio, enfatiza a posição em que surge o primeiro item relevante.
 \end{itemize}
 
-Além das métricas de ranqueamento, a avaliação incluiu indicadores de interesse prático para o sistema, exibidos nas tabelas de resultados pelas abreviações apresentadas a seguir:
+Além das métricas de ranqueamento, a avaliação incluiu indicadores de interesse prático, exibidos nas tabelas de resultados posteriormente. São eles:
 
 \begin{itemize}
     \item[a)] \textit{Latência p95} (Lat.\ p95): tempo de inferência no percentil 95 das consultas, em milissegundos (ms), que reflete o custo de geração das recomendações em uso interativo.
     \item[b)] \textit{Cobertura} de catálogo (Cob.): fração do catálogo recomendada ao menos uma vez ao longo da avaliação, indicando o quanto o modelo explora o acervo.
     \item[c)] \textit{Diversidade} intra-lista (Div.): variedade temática média entre os itens de uma mesma lista, calculada a partir das \textit{tags}.
-    \item[d)] \textit{Novidade} (Nov.): tendência do modelo a recomendar itens menos populares, atribuindo pontuação tanto maior quanto menos frequente for o item no catálogo.
+    \item[d)] \textit{Novidade} (Nov.): tendência do modelo a recomendar itens menos populares, atribuindo pontuação maior quanto menos frequente for o item no catálogo.
     \item[e)] \textit{Recência} média (Rec.): distância temporal média, em dias (d), entre os itens recomendados e o instante da consulta.
-    \item[f)] \textit{Avaliação manual} (Manual): número de critérios atendidos, em um total de 12, três casos qualitativos avaliados manualmente, cada um com quatro critérios (aderência temática, recência, variedade e ausência de itens irrelevantes).
+    \item[f)] \textit{Avaliação manual} (Manual): quantidade de critérios atendidos, considerando os 12 critérios de avaliação, agrupados em três casos qualitativos de quatro critérios cada
 \end{itemize}
 
-Em conjunto, esses indicadores permitem analisar não apenas a relevância das recomendações, mas também sua variedade, atualidade e custo de geração. No \textit{benchmark} deste trabalho, a métrica-alvo principal para a seleção do melhor modelo foi o NDCG@10, por combinar relevância e posição dos itens na lista, e as métricas de ranqueamento são reportadas nas profundidades K = 10 e K = 100. As métricas de ranqueamento (\textit{Precision@K}, \textit{Recall@K}, \textit{HitRate@K}, \textit{MAP@K}, \textit{NDCG@K} e \textit{MRR@K}), a cobertura, a diversidade e a novidade variam de 0 a 1, sendo melhores quanto mais próximas de 1, já a recência média é expressa em dias e a latência de inferência em milissegundos, ambas preferíveis quanto menores.
+Em conjunto, esses indicadores permitem analisar não apenas a relevância das recomendações, mas também sua variedade e custo de geração. No \textit{benchmark} deste trabalho, a métrica-alvo para a seleção do melhor modelo foi o NDCG@10, por combinar relevância e posição dos itens na lista. As métricas de ranqueamento, a cobertura, a diversidade e a novidade variam de 0 a 1, sendo melhores resultados mais próximos de 1. Já a recência média e a latência de inferência, ambas preferíveis valores baixos.
 
-A avaliação manual complementa as métricas automáticas com uma inspeção qualitativa reproduzível. Foram definidos três casos representativos do domínio \textit{fitness}, cada um com uma entrada fixa (\textit{tags}, instante de referência e tamanho da lista) e quatro critérios objetivos de aceitação: aderência temática, recência, variedade e ausência de itens irrelevantes. Para cada modelo, o sistema verifica automaticamente o atendimento de cada critério, resultando em uma pontuação total de 0 a 12 (três casos com quatro critérios cada). Por serem fixos, os casos e os critérios tornam essa avaliação comparável entre os modelos e as versões da base.
+Para a avaliação Manual foram definidos três casos representativos do domínio \textit{fitness}, cada um com uma entrada fixa, que são as \textit{tags}, instante de referência e tamanho da lista e quatro critérios objetivos de aceitação, aderência temática, recência, variedade e ausência de itens irrelevantes. Para cada modelo, o sistema verifica o atendimento de cada critério, resultando em uma pontuação total de 0 a 12, três casos com quatro critérios cada. Por serem fixos, os casos e os critérios tornam essa avaliação comparável entre os modelos e as versões da base.
 
 
 
@@ -550,7 +546,7 @@ LTR (\textit{LightGBMRanker}) & 0,0000 & 0,1732 & 0,0000 & 9,9 & 0,690 & \textbf
 \small \\ Fonte: Elaborado pelos autores.
 \end{table}
 
-Na \texttt{SF0.1}, o volume é insuficiente para as métricas no topo: com apenas 6 consultas válidas, o NDCG@10 e o Recall@10 são nulos em todos os modelos. Ainda assim, o NDCG@100 já é informativo, Popularidade (0,1812) e LTR (0,1732) recuperam itens-alvo dentro das 100 primeiras posições, confirmando que a rodada cumpre seu papel de validação técnica do protocolo. Os resultados conclusivos vêm das rodadas \texttt{SF3} e \texttt{SF30}.
+Na \texttt{SF0.1}, o volume de dados é insuficiente para avaliar adequadamente as métricas de topo do ranking. Como existem apenas 6 consultas válidas, os valores de NDCG@10 e Recall@10 são nulos para todos os modelos. Ainda assim, o NDCG@100 fornece informações relevantes, pois os modelos de Popularidade (0,1812) e LTR (0,1732) conseguem recuperar os itens-alvo entre as 100 primeiras posições. Esse resultado demonstra que a rodada cumpre seu objetivo de validação técnica do protocolo experimental. Portanto, as análises mais robustas e conclusivas concentram-se nas rodadas \texttt{SF3} e \texttt{SF30}.
 
 \begin{table}[H]
 \centering
@@ -573,7 +569,7 @@ LTR (\textit{LightGBMRanker}) & 0,0016 & \textbf{0,0082} & \textbf{0,0044} & 41,
 \small \\ Fonte: Elaborado pelos autores.
 \end{table}
 
-Na \texttt{SF3}, com 1.663 consultas válidas, os modelos passam a se diferenciar. O \textit{Baseline} otimizado lidera no topo (NDCG@10 = 0,0023), superando o \textit{Baseline} padrão (0,0010) e o LTR (0,0016) e deixando a Popularidade nula; em profundidade, porém, o LTR assume a liderança (NDCG@100 = 0,0082 e Recall@10 = 0,0044), sinalizando maior capacidade de recuperar itens relevantes em posições mais distantes do topo. Nos indicadores complementares, o \textit{Baseline} padrão expõe 97,3\% do catálogo, o otimizado prioriza fortemente a recência (6 dias), desejável para conteúdo \textit{fitness}, e o LTR atinge a maior diversidade intra-lista (0,870).
+Na \texttt{SF3}, com 1.663 consultas válidas, os modelos passam a se diferenciar. O \textit{Baseline} otimizado lidera no topo com NDCG@10 (0,0023), superando o \textit{Baseline} padrão (0,0010) e o LTR (0,0016), deixando a Popularidade nula. O LTR assume a liderança com NDCG@100 (0,0082) e Recall@10 (0,0044), sinalizando maior capacidade de recuperar itens relevantes em posições mais distantes do topo. Nos indicadores complementares, o \textit{Baseline} padrão expõe 97,3\% do catálogo, o otimizado prioriza fortemente a recência, o que é desejável para conteúdo \textit{fitness}, e o LTR atinge a maior diversidade.
 
 \begin{table}[H]
 \centering
@@ -596,7 +592,9 @@ LTR (\textit{LightGBMRanker}) & 0,0000 & 0,0000 & 0,0000 & 242,6 & 0,026 & \text
 \small \\ Fonte: Elaborado pelos autores.
 \end{table}
 
-Na \texttt{SF30}, com 21.247 consultas válidas e catálogo dez vezes maior, a tarefa torna-se substancialmente mais difícil: o melhor NDCG@10 passa a ser do \textit{Baseline} padrão (0,0002), cerca de dez vezes inferior ao melhor da \texttt{SF3}. Essa queda decorre do aumento da dificuldade, com 77.105 candidatos, é mais raro acertar a próxima interação exata no topo, e não de uma piora absoluta dos modelos; por isso o NDCG@100 oferece leitura mais estável entre escalas. Os \textit{baselines} híbridos confirmam o perfil mais adequado à produção, com cobertura próxima de 90\% (88,1\% no padrão e 89,1\% no otimizado) e baixa recência média (13 e 5 dias), enquanto o LTR mantém a maior diversidade (0,946) e a melhor avaliação manual (9/12), porém com cobertura baixa (2,6\%) e recência elevada. A latência de inferência cresce com a complexidade dos modelos: cerca de 25 ms na Popularidade, entre 114 e 121 ms nos \textit{baselines} híbridos e 243 ms no LTR, faixa já próxima do limite usualmente aceitável para sistemas interativos.
+Na \texttt{SF30}, com 21.247 consultas válidas e catálogo dez vezes maior, a tarefa torna-se mais difícil. O melhor NDCG@10 passa a ser do \textit{Baseline} padrão (0,0002), cerca de dez vezes inferior ao melhor da \texttt{SF3}. Essa queda decorre do aumento da dificuldade, com 77.105 candidatos, é mais raro acertar a próxima interação exata no topo, mas não quer dizer uma piora absoluta dos modelos. 
+
+Por isso, o NDCG@100 oferece leitura mais estável entre escalas. Os \textit{baselines} confirmam o perfil mais adequado à produção, com cobertura próxima de 90\% e baixa recência média, enquanto o LTR mantém a maior diversidade (0,946) e a melhor avaliação manual (9/12), porém com cobertura baixa (2,6\%) e recência elevada. A latência de inferência cresce com a complexidade dos modelos, cerca de 25 ms na Popularidade, entre 114 e 121 ms nos \textit{baselines} e 243 ms no LTR.
 
 
 
@@ -623,24 +621,31 @@ Final & \texttt{SF30} & \textit{Baseline} padrão & 0,0002 & 0,0004 & Catálogo 
 \small \\ Fonte: Elaborado pelos autores.
 \end{table}
 
-A evolução das rodadas indica um padrão consistente: em menor escala, os experimentos servem principalmente para validar o protocolo, enquanto em escalas maiores torna-se possível distinguir com mais clareza o comportamento de cada família de modelos. Nesse cenário, os \textit{baselines} híbridos mostraram maior estabilidade com o crescimento do catálogo, ao passo que a abordagem de ranqueamento aprendido se mostrou mais dependente de ajuste fino e volume de dados. Tal resultado está em linha com a literatura, que aponta que sinais explícitos do item, como \textit{tags}, popularidade e recência, tendem a escalar bem em catálogos amplos \cite{Lops2011CB}, enquanto modelos de ranqueamento aprendido demandam maior calibração para atingir melhor desempenho \cite{Ke2017LightGBM,Burges2010LTROverview}.
+A evolução das rodadas indica um padrão consistente, em menor escala, os experimentos servem principalmente para validar o protocolo, enquanto em escalas maiores torna-se possível distinguir com mais clareza o comportamento de cada modelo. Nesse cenário, os \textit{baselines} mostraram maior estabilidade com o crescimento do catálogo, ao passo que a abordagem de ranqueamento aprendido se mostrou mais dependente de ajuste fino e volume de dados. 
 
-A leitura por dimensão reforça que os modelos apresentam perfis complementares. Os \textit{baselines} híbridos mostraram desempenho mais equilibrado em aspectos diretamente ligados ao uso em produção, como precisão no topo, cobertura e recência, enquanto o LTR se destacou sobretudo em profundidade de recuperação e diversidade. Na \texttt{SF3}, o \textit{Baseline} otimizado apresenta o perfil mais equilibrado e o LTR lidera em profundidade de ranqueamento; na \texttt{SF30}, os \textit{baselines} híbridos concentram o desempenho mais consistente, sugerindo maior robustez em catálogos maiores. Em todos os casos, a escolha do modelo mais adequado depende da dimensão priorizada no sistema.
+Tal resultado está em linha com a literatura, que aponta que sinais explícitos do item, como \textit{tags}, popularidade e recência, tendem a escalar bem em catálogos amplos \cite{Lops2011CB}, enquanto modelos de ranqueamento aprendido, demandam maior calibração para atingir melhor desempenho \cite{Ke2017LightGBM,Burges2010LTROverview}.
+
+Em suma, os modelos apresentam perfis complementares. Os \textit{baselines} mostraram desempenho mais equilibrado em aspectos ligados ao uso em produção, como precisão no topo, cobertura e recência, enquanto o LTR se destacou sobretudo em profundidade de recuperação e diversidade. Em todos os casos, a escolha do modelo mais adequado depende da dimensão priorizada no sistema.
+
+
 
 
 \subsection{Contextualização dos valores absolutos}
 
-Os valores absolutos de NDCG@10 observados neste estudo podem parecer baixos quando analisados isoladamente, mas são esperados em razão do rigor do gabarito e do tamanho do catálogo. Em sistemas comerciais, o NDCG costuma adotar uma definição ampla de relevância, na qual qualquer item da mesma categoria conta como acerto, com valores tipicamente entre 0,05 e 0,30 \cite{Covington2016YouTube,GomezUribe2016Netflix}. Neste trabalho, porém, a recomendação só é correta quando recupera exatamente o próximo \textit{post} acessado pelo usuário entre dezenas de milhares de candidatos; sob protocolos igualmente estritos, a literatura acadêmica reporta valores entre 0,001 e 0,02 \cite{Jarvelin2002NDCG,Burges2010LTROverview}, faixa na qual se inserem os resultados obtidos.
+Os valores absolutos de NDCG@10 observados neste estudo podem parecer baixos quando analisados isoladamente, mas são esperados em razão do rigor do gabarito, do tamanho do catálogo e, sobretudo, do protocolo de avaliação adotado. Neste trabalho, a recomendação só é considerada correta quando o modelo recupera exatamente o próximo \textit{post} acessado o entre milhares de outros posts. Esse critério, diferentemente de definições que admitem como acerto qualquer item de uma mesma categoria, exige a identificação do item exato, o que reduz os valores absolutos das métricas de ranqueamento.
 
-O tamanho do catálogo reforça essa leitura. Na \texttt{SF30}, com 77.105 \textit{posts} candidatos, a probabilidade aleatória de acertar o item entre os 10 primeiros é de apenas \(10/77.105 \approx 0{,}013\%\); o \textit{Baseline} padrão atinge NDCG@10 = 0,0002, cerca de 1,5 vez acima desse piso. Em catálogos menores, como na \texttt{SF3}, o piso aleatório é maior e os modelos alcançam valores absolutos mais altos, o que explica o NDCG@10 = 0,0023 do \textit{Baseline} otimizado. Assim, o valor científico do trabalho está na comparação relativa entre modelos sob o mesmo protocolo e na análise de suas trocas (precisão no topo \textit{vs.} cobertura \textit{vs.} recência \textit{vs.} latência), confirmando que modelos mais sofisticados superam a heurística trivial de popularidade.
+A própria magnitude das métricas, depende criticamente do protocolo de avaliação. Grande parte da literatura de recomendação sequencial reporta NDCG@10 na ordem de (0.1), mas o faz sob avaliação amostrada, na qual o item-alvo é ranqueado contra uma centena de candidatos \cite{10.1145/3535335}.
 
-Como limitação atual do protocolo, a versão personalizada da trilha LTR, baseada explicitamente na identidade do usuário durante a ordenação, ainda não integra estas rodadas. Assim, a comparação atual permanece concentrada nos \textit{baselines} híbridos e na variante LTR descrita na Etapa~3.
+Sob ranqueamento completo do catálogo, protocolo adotado neste trabalho, os valores absolutos caem ordens de grandeza em relação aos comumente reportados com amostragem \cite{10.1145/3460231.3475943,10.1145/3523227.3548487}, situando-se em faixas baixas compatíveis com as aqui observadas. A definição formal das medidas (n)DCG empregadas neste trabalho segue \cite{Jarvelin2002NDCG}.
+
+O tamanho do catálogo reforça essa leitura. Na \texttt{SF30}, com 77.105 \textit{posts} candidatos, a probabilidade aleatória de acertar o item entre os 10 primeiros é de apenas \(10/77.105 \approx 0{,}013\%\). Já o \textit{Baseline} padrão atinge NDCG@10 = 0,0002, cerca de 1,5 vez acima desse piso. Em catálogos menores, como na \texttt{SF3}, o piso aleatório é maior e os modelos alcançam valores absolutos mais altos, o que explica o NDCG@10 = 0,0023 do \textit{Baseline} otimizado. Assim, o valor científico do trabalho está na comparação relativa entre modelos sob o mesmo protocolo e na análise de suas métricas, confirmando que modelos mais sofisticados superam a heurística trivial de popularidade.
+
 
 \subsection{Síntese dos achados}
 
-A consolidação das três rodadas confirma que cada família de modelos tem um ponto forte distinto e complementar: a Popularidade cumpre o papel de referência mínima, sendo superada quando há volume suficiente de consultas; o \textit{baseline} padrão lidera em cobertura de catálogo; o \textit{baseline} otimizado se destaca em precisão no topo e recência, relevante no domínio \textit{fitness}; e o LTR (\textit{LightGBMRanker}) sobressai em profundidade de recuperação e diversidade. Não há, portanto, um modelo dominante: a escolha para produção depende do critério priorizado pelo negócio (latência, engajamento em conteúdo recente ou descoberta diversificada).
+A consolidação das três rodadas confirma que cada família de modelos tem um ponto forte distinto e complementar. A Popularidade cumpre o papel de referência mínima, sendo superada quando há volume suficiente de consultas. O \textit{baseline} padrão lidera em cobertura de catálogo, já o \textit{baseline} otimizado se destaca em precisão no topo e recência, relevante no domínio \textit{fitness}. Por fim, o LTR sobressai em profundidade de recuperação e diversidade. Não há, portanto, um modelo dominante, a escolha para produção depende do critério priorizado pelo negócio, latência, engajamento em conteúdo recente ou descoberta diversificada.
 
-O volume de dados, por sua vez, é determinante para a comparação: a \texttt{SF0.1} apenas valida o protocolo, a \texttt{SF3} já distingue os modelos e a \texttt{SF30} reduz o NDCG@10 absoluto pela maior dificuldade da tarefa, tornando o NDCG@100 a métrica mais informativa em escala.
+O volume de dados, por sua vez, é determinante para a comparação sendo que a \texttt{SF0.1} valida apenas o protocolo, a \texttt{SF3} já distingue os modelos e a \texttt{SF30} reduz o NDCG@10 absoluto pela maior dificuldade da tarefa, tornando o NDCG@100 a métrica mais informativa em escala.
 
 Por fim, três limitações devem ser destacadas. A primeira é o uso de um critério estrito de avaliação, baseado na próxima interação exata, ao passo que sistemas comerciais costumam adotar janelas de relevância mais amplas e, por isso, tendem a apresentar valores absolutos de NDCG mais altos. A segunda é o caráter sintético da base \textit{LDBC SNB}, cujo conteúdo textual é gerado aleatoriamente, limitando o uso de \textit{embeddings} ao nome das \textit{tags}. A terceira é a ausência de avaliação \textit{online} com usuários reais.
 

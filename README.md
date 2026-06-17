@@ -2,6 +2,41 @@
 
 Pipeline de extração e filtragem do LDBC SNB Interactive v1 para conteúdo fitness (treinos, academia, corrida).
 
+## Entendendo o projeto (para leigos)
+
+> Esta seção explica, em linguagem bem simples, **o que este projeto é e como ele funciona como um todo** — sem exigir que você saiba programar. Cada módulo tem, no seu próprio README, uma seção "Explicação dos códigos (para leigos)" e um glossário detalhado. Aqui damos a visão geral e, ao final do arquivo, um **Glossário-mestre** com os termos que aparecem em todo lugar.
+
+### O que é um sistema de recomendação?
+
+É a tecnologia que **sugere coisas para você**. Quando a Netflix indica um filme, o Spotify monta uma playlist ou uma loja mostra "quem comprou isto também levou aquilo", há um sistema de recomendação por trás. Este projeto é exatamente isso, mas para **posts de uma rede social fitness**: dado um tema (tags como "corrida", "musculação") e um momento no tempo, ele sugere os posts mais relevantes.
+
+Uma observação importante: este projeto **não usa "IA generativa" nem redes neurais gigantes**. Ele é um **recomendador clássico**, que combina estatísticas e regras claras. Isso o torna **rápido, explicável** (dá para entender por que cada post foi sugerido) e **determinístico** (a mesma pergunta dá sempre a mesma resposta).
+
+### De onde vêm os dados?
+
+Como não seria ético usar dados reais de pessoas, o projeto usa o **LDBC SNB**, uma **rede social fictícia** (gerada por computador para pesquisa), com posts, curtidas e amizades realistas. Filtramos dela apenas o conteúdo **fitness**.
+
+### O fluxo completo, em quatro etapas
+
+Pense numa **linha de produção** que vai do dado bruto até a recomendação pronta:
+
+```mermaid
+flowchart LR
+    E["1. Extracao<br/>(extracao_filtragem)"] --> T["2. Treinamento<br/>(treinamento)"]
+    T --> A["3. Avaliacao<br/>(avaliacao)"]
+    T --> S["4. Simulador<br/>(simulador)"]
+```
+
+1. **Extração** ([extracao_filtragem/README.md](extracao_filtragem/README.md)): abre a "caixa" gigante de dados brutos e **separa só o conteúdo fitness**, organizando em arquivos limpos.
+2. **Treinamento** ([treinamento/README.md](treinamento/README.md)): usa esses arquivos para **construir o cérebro recomendador** (calcula as "pistas" e monta os modelos).
+3. **Avaliação** ([avaliacao/README.md](avaliacao/README.md)): aplica uma "**prova**" no recomendador para **medir o quanto ele acerta**, com notas objetivas.
+4. **Simulador** ([simulador/README.md](simulador/README.md)): uma **página web** onde você escolhe tags e vê as recomendações na prática.
+
+### Os dois "ingredientes" centrais que aparecem o tempo todo
+
+- **Tag:** uma **etiqueta de assunto** colada a um post (como uma hashtag: `#corrida`). É assim que o sistema sabe do que cada post fala.
+- **Timestamp:** o **momento no tempo** (uma data convertida em número), usado para dar preferência a conteúdo mais próximo da data de referência.
+
 ## Dataset necessário
 
 O pipeline requer o **snapshot completo** do LDBC SNB (Tag, TagClass, Post, Comment, etc.).  
@@ -348,3 +383,49 @@ a afinidade usuário-item substitui o sinal de popularidade.
 | `user_interests_fitness.parquet` | `user_id`, `tag_id`, `tag_name` | Perfil de interesse declarado do usuário — recomendação content-based ("usuário segue essa tag → mostrar posts com essa tag") |
 | `user_social_graph.parquet` | `user_id`, `friend_id`, `since` | Grafo de amizades filtrado para usuários ativos em fitness — recomendação colaborativa social ("amigos de quem curtiu também curtiram") |
 | `tag_cooccurrence.parquet` | `tag_a`, `tag_b`, `cooccurrences` | Co-ocorrência de tags nos mesmos posts/comments — recomendação por similaridade de tags ("quem gosta de A possivelmente gosta de B") |
+
+---
+
+## Glossário-mestre (termos que aparecem em todo o projeto)
+
+> Glossário consolidado dos termos **transversais** (que aparecem em vários módulos), explicados para quem não programa. Para listas mais completas e específicas, veja os glossários de cada módulo: [extração](extracao_filtragem/README.md#glossário-de-termos-extração), [treinamento](treinamento/README.md#glossário-de-termos-treinamento) e [avaliação](avaliacao/README.md#glossário-de-termos-avaliação).
+
+### Dados e arquivos
+
+- **Dataset:** o **conjunto de dados** usado. Aqui, uma rede social **fictícia** (LDBC SNB) gerada para pesquisa.
+- **LDBC SNB:** o nome dessa rede social de mentira (um *benchmark*, ou padrão de comparação, de redes sociais).
+- **Scale factor (fator de escala):** o **tamanho** do dataset, de `sf0.1` (minúsculo, para testes) a `sf30` (enorme).
+- **CSV:** uma **planilha em texto puro**, simples mas sem otimização.
+- **Parquet:** uma **planilha compacta e rápida** de ler (formato dos arquivos de trabalho do projeto).
+- **Tag:** uma **etiqueta de assunto** (hashtag) colada a um post.
+- **Timestamp:** um **momento no tempo** representado como número (milissegundos).
+- **Manifesto / proveniência:** a **"nota fiscal" dos dados** — registra de onde vieram e como foram gerados, para garantir confiança e reprodutibilidade.
+- **Namespace (dataset_key):** uma **"gaveta" separada por dataset**, para que vários datasets convivam no projeto sem se misturar.
+
+### Conceitos de recomendação
+
+- **Sistema de recomendação:** tecnologia que **sugere itens** relevantes (como Netflix/Spotify).
+- **Interação:** uma **ação de uma pessoa com um conteúdo** (curtir, criar, responder).
+- **Co-ocorrência:** duas tags que **aparecem juntas** com frequência (sinal de temas relacionados).
+- **Grafo social:** o **mapa de amizades** (quem conhece quem).
+- **Score / relevância:** a **nota** (de 0 a 1) que indica o quanto um post é recomendado.
+- **Ranker (recomendador):** o **motor que ordena** os posts do mais para o menos relevante.
+- **Personalizado:** quando a recomendação leva em conta **os gostos de um usuário específico**.
+
+### Treino e modelos
+
+- **Feature (pista):** um **número que descreve** o quão bom é um candidato (similaridade, recência...).
+- **Split (treino/validação/teste):** a **divisão** dos dados em "estudo", "simulado" e "prova", para avaliar com honestidade.
+- **Seed:** um número que **fixa a aleatoriedade**, garantindo que tudo se repita igual (reprodutibilidade).
+- **Vazamento de dados (leakage):** quando o modelo **"cola"** usando informação da prova durante o estudo — inflaria os resultados.
+- **Baseline:** o modelo **simples de referência**, usado para comparação.
+- **LTR (Learning to Rank):** abordagem em que o modelo **aprende sozinho a ordenar**, em vez de usar pesos definidos à mão.
+- **OOV (fora do vocabulário):** uma tag que o modelo **nunca viu** e, por isso, não sabe pontuar.
+
+### Avaliação
+
+- **Gabarito (ground truth):** as **respostas certas** (o que a pessoa realmente fez depois).
+- **@K / Top-K:** considerar apenas os **K primeiros** itens recomendados.
+- **Precision / Recall / NDCG / etc.:** diferentes **notas de acerto** das recomendações (detalhadas no [README de avaliação](avaliacao/README.md#entendendo-as-métricas-com-exemplos)).
+- **Latência:** o **tempo de resposta** do modelo.
+- **Benchmark:** uma **comparação padronizada** entre vários modelos ("campeonato").
