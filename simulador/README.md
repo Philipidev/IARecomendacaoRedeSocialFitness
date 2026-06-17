@@ -33,6 +33,13 @@ Abra `http://localhost:8001` no navegador.
 3. Ajuste opções: quantidade (top-K), user ID opcional (ativa modo personalizado) e exclusão de tags exatas.
 4. Clique em **Recomendar**.
 
+### Exemplos rápidos (TCC)
+
+No topo da página há dois exemplos pré-prontos que, com um clique, preenchem modelo, tags e opções (você ainda clica em **Recomendar** para gerar o resultado):
+
+- **Treino de força (100% fitness)** — tags `The_New_Workout_Plan`, `Muscle_of_Love`, `The_Weight` no modelo `baseline_hibrido_padrao` (sf30). Demonstra recomendações tematicamente coerentes.
+- **Fitness + termos fora do tema** — as mesmas tags + `Pizza` e `JavaScript`. Como essas duas estão fora do vocabulário fitness, o modelo as ignora (aviso "tags ignoradas") e mantém o mesmo resultado fitness — demonstra robustez a entradas fora do domínio. As tags ignoradas aparecem como chips âmbar.
+
 > A primeira recomendação em cada modelo demora alguns segundos porque os artefatos (`vectorizer.pkl`, `post_matrix.npy`, `posts_cache.parquet`, etc.) são carregados em memória. Chamadas subsequentes no mesmo modelo são rápidas (cache em `treinamento.recomendar._modelos_cache`).
 
 ## Endpoints

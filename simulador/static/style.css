@@ -186,6 +186,42 @@ option.best-option {
   color: #bbf7d0;
 }
 
+.use-cases {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+.use-case-btn {
+  flex: 1 1 240px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  text-align: left;
+  padding: 14px 16px;
+  background: var(--bg-elev);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  color: var(--text);
+  cursor: pointer;
+  transition: border-color 0.15s, transform 0.15s;
+}
+
+.use-case-btn:hover {
+  border-color: var(--primary);
+  transform: translateY(-1px);
+}
+
+.use-case-title {
+  font-weight: 600;
+  font-size: 14px;
+}
+
+.use-case-desc {
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
 .tag-controls {
   display: flex;
   gap: 12px;
@@ -248,6 +284,18 @@ option.best-option {
 
 .tag-chip.hidden {
   display: none;
+}
+
+.tag-chip.oov {
+  border-color: var(--warn);
+  color: #fde68a;
+  background: rgba(245, 158, 11, 0.12);
+}
+
+.tag-chip.oov.selected {
+  background: rgba(245, 158, 11, 0.22);
+  border-color: var(--warn);
+  color: #fde68a;
 }
 
 .tags-summary {

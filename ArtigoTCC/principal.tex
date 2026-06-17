@@ -217,11 +217,11 @@ A Tabela \ref{tab:rodadas_execucao_tcc} apresenta as três versões empregadas, 
 \hline
 \textbf{Rodada} & \textbf{Versão} & \textbf{Arquivo} & \textbf{Mensagens \textit{fitness}} & \textbf{Interações \textit{fitness}} & \textbf{Objetivo} \\
 \hline
-Inicial & \texttt{SF0.1} & 18 MB & 38 & 94 & Fluxo completo validado e primeira leitura comparativa concluída. \\
+Inicial & \texttt{SF0.1} & 18 MB & 158 & 381 & Fluxo completo validado e primeira leitura comparativa concluída. \\
 \hline
-Intermediária & \texttt{SF3} & 690 MB & 2.199 & 10.720 & Verificar o comportamento das métricas com maior volume de dados. \\
+Intermediária & \texttt{SF3} & 690 MB & 7.585 & 32.074 & Verificar o comportamento das métricas com maior volume de dados. \\
 \hline
-Final & \texttt{SF30} & 7,32 GB & 23.485 & 120.807 & Consolidar os resultados a serem apresentados na versão final do trabalho. \\
+Final & \texttt{SF30} & 7,32 GB & 77.105 & 375.979 & Consolidar os resultados a serem apresentados na versão final do trabalho. \\
 \hline
 \end{tabular}
 \end{table}
@@ -319,8 +319,6 @@ A Figura \ref{fig:fluxo_extracao} ilustra a lógica dessa filtragem. O procedime
 
 Para ilustrar o impacto dessa filtragem, a Tabela \ref{tab:estatisticas_extracao} apresenta o volume de dados extraídos da versão SF0.1 do \textit{LDBC SNB} após a aplicação das regras de domínio.
 
-\textcolor{red}{Pq Pares de coocorrência de tags está com 0?}
-
 \begin{table}[H]
 \centering
 \caption{Estatísticas da base de dados após filtragem para o domínio \textit{fitness} (Versão \texttt{SF0.1})}
@@ -340,15 +338,18 @@ Pares de coocorrência de \textit{tags} & 0 \\
 \end{tabular}
 \end{table}
 
+O valor nulo de pares de coocorrência de \textit{tags} na \texttt{SF0.1} decorre da escala reduzida desta versão: nenhuma mensagem \textit{fitness} reúne duas ou mais \textit{tags} \textit{fitness} simultaneamente, condição necessária para a formação de um par. Esse sinal deixa de ser nulo à medida que a base cresce, passando a 11 pares na \texttt{SF3} e a 94 na \texttt{SF30}.
+
+
 \subsubsection{Etapa 2: Separação experimental}
 
 Na segunda etapa, as interações \textit{fitness} foram divididas em treino, validação e teste, nas proporções de 70\%, 15\% e 15\%, respectivamente. O conjunto de treino é utilizado para ajustar os modelos, o conjunto de validação é empregado para calibrar pesos e hiperparâmetros e o conjunto de teste permanece reservado para a avaliação final do desempenho \cite{Goodfellow2016DeepLearning,Hastie2001Elements}.
 
 Em sistemas de recomendação, o critério de divisão dos dados é tão relevante quanto a proporção entre os conjuntos. Como cada interação está associada a um instante no tempo, a avaliação deve preservar a ordem cronológica dos eventos, garantindo que o modelo utilize apenas informações anteriores ao momento da recomendação. Uma divisão aleatória violaria essa estrutura e poderia introduzir vazamento de dados, especialmente em atributos derivados, como coocorrência de \textit{tags}, popularidade dos itens e escores de influência social. Por essa razão, neste estudo foi adotada uma separação temporal global.
 
-\textcolor{red}{Tenho dúvidas se isso realmente funciona. Me parece que a base de treino pode ser muito diferente da de teste. Conversamos melhor na reunião!}
+Diferenças de distribuição entre treino e teste são esperadas nesse desenho e, na verdade, desejáveis: reproduzem o cenário real de uso, em que o modelo recomenda itens futuros a partir do histórico já observado. Para que essa diferença não se traduza em viés, o catálogo é mantido nos três conjuntos e os sinais derivados são recalculados apenas com o treino, como detalhado adiante.
 
-\textcolor{red}{E a validação cruzada?}
+A validação cruzada tradicional (\textit{k-fold}) não se aplica a dados ordenados no tempo, pois as dobras aleatórias quebram a cronologia e reintroduzem vazamento \cite{BERGMEIR2012192}; seu equivalente adequado seria uma validação cruzada temporal por janelas deslizantes, de custo bem mais elevado. Neste trabalho, a própria divisão temporal já reserva um conjunto de validação, separado do conjunto de teste, mantido apenas para a avaliação final.
 
 A separação foi realizada diretamente sobre o eixo cronológico padronizado na Etapa 1. As interações de todos os usuários foram ordenadas pelo carimbo de tempo e, a partir dessa sequência global, foram definidos dois cortes temporais que dividiram os dados em treino, validação e teste. O corte $t_{\text{train\_val}}$ marca a transição entre treino e validação, enquanto
 $t_{\text{val\_test}}$ delimita o início do teste. Assim, preservou-se a proporção de 70\%/15\%/15\% registrando no manifesto da rodada para garantir reprodutibilidade.
@@ -357,7 +358,7 @@ O catálogo de \textit{posts} foi mantido nos três conjuntos, variando apenas o
 
 \subsubsection{Etapa 3: Treinamento dos modelos}
 
-\textcolor{red}{Esses são os nomes dos modelos?}
+\textcolor{red}{Esses são os nomes dos modelos?} \textcolor{blue}{Sim, são os nomes das quatro configurações do \textit{benchmark} usadas nas tabelas de resultados.}
 
 Nesta etapa, envolve o treinamento dos modelos do benchmark que foram treinadas em quatro configurações de modelos: um \textit{baseline} de popularidade, duas variantes de um modelo híbrido de referência e uma abordagem de aprendizado para ranqueamento. Cada uma dessas configurações foi incluída para atender a um objetivo específico do estudo e servir como base comparativa na análise dos resultados.
 
@@ -451,9 +452,13 @@ Por fim, um orquestrador foi utilizado para organizar os experimentos em termos 
 
 \textcolor{red}{Fiquei com dúvidas sobre essa avaliação offline. Conversamos na reunião.}
 
-A avaliação em modo \textit{offline} é realizada fora do ambiente real de uso, utilizando dados previamente reservados para permitir a comparação entre diferentes configurações sob as mesmas condições. Neste estudo, utiliza-se o conjunto de teste, no qual as interações de cada usuário são ordenadas temporalmente. Cada interação observada é tomada como item de referência, enquanto as interações futuras do mesmo usuário constituem a resposta relevante. Com base nas \textit{tags} e no instante temporal desse item de referência, o recomendador gera uma lista ordenada de candidatos, posteriormente comparada aos itens efetivamente acessados em seguida.
+A avaliação em modo \textit{offline} é feita com dados que separamos previamente, em vez de testar com usuários reais. A vantagem é poder comparar os modelos de forma justa, todos nas mesmas condições, e repetir o experimento quantas vezes for preciso.
 
-A Figura \ref{fig:fluxo_avaliacao} ilustra a lógica desse protocolo de avaliação. Ela demonstra como o sistema agrupa as interações por usuário, ordena-as cronologicamente e separa uma interação como referência.
+A ideia central é simples: escolhemos um instante na linha do tempo de cada usuário e dividimos o histórico dele em duas partes, o que ele já tinha acessado antes daquele instante e o que viria a acessar depois. O modelo recebe apenas a parte de antes (as \textit{tags} e o horário da atividade mais recente do usuário) e, com isso, monta uma lista de recomendações a partir de todo o catálogo. Em seguida, comparamos essa lista com a parte de depois, que funciona como gabarito, quanto mais itens da lista o usuário realmente acessou depois, melhor o modelo. Para que o teste seja justo, o modelo nunca enxerga o futuro, e itens que o usuário já tinha visto são retirados da lista.
+
+Nem todo usuário entra nessa conta, só é possível avaliar quem tem atividade antes e depois do instante escolhido, uma para servir de base e outra para conferir o acerto. Por isso o número de consultas avaliadas muda conforme a versão da base. Como medida de relevância, contamos como acerto o item que o usuário de fato acessou depois. É uma aproximação prática e amplamente adotada na avaliação \textit{offline} de recomendadores \cite{10.1145/963770.963772}, mas que não capta tudo, por exemplo, se a pessoa gostou da recomendação ou descobriu algo novo por acaso. Medir isso exigiria testes com usuários reais (avaliação \textit{online}), o que fica como trabalho futuro.
+
+A Figura \ref{fig:fluxo_avaliacao} resume esse fluxo: agrupar as interações por usuário, ordená-las no tempo, separar a referência do gabarito, gerar o Top-K e calcular as métricas.
 
 \textcolor{red}{... não ficou legal}
 
@@ -503,44 +508,49 @@ Para mensurar a qualidade do ranqueamento, foram adotadas métricas que consider
     \item[f)] \textit{MRR@K}, ou posto recíproco médio, enfatiza a posição em que surge o primeiro item relevante.
 \end{itemize}
 
-Além das métricas de ranqueamento, a avaliação incluiu medidas de interesse prático para o sistema, como cobertura de catálogo, diversidade intra-lista por \textit{tags}, novidade baseada em popularidade inversa, recência média recomendada e latência de inferência. Em conjunto, essas métricas permitem analisar não apenas a relevância das recomendações, mas também sua variedade, atualidade e custo de geração. No \textit{benchmark} deste trabalho, a métrica-alvo principal para seleção do melhor modelo foi o NDCG@10, por combinar relevância e posição dos itens na lista.
+Além das métricas de ranqueamento, a avaliação incluiu indicadores de interesse prático para o sistema, exibidos nas tabelas de resultados pelas abreviações apresentadas a seguir:
+
+\begin{itemize}
+    \item[a)] \textit{Latência p95} (Lat.\ p95): tempo de inferência no percentil 95 das consultas, em milissegundos (ms), que reflete o custo de geração das recomendações em uso interativo.
+    \item[b)] \textit{Cobertura} de catálogo (Cob.): fração do catálogo recomendada ao menos uma vez ao longo da avaliação, indicando o quanto o modelo explora o acervo.
+    \item[c)] \textit{Diversidade} intra-lista (Div.): variedade temática média entre os itens de uma mesma lista, calculada a partir das \textit{tags}.
+    \item[d)] \textit{Novidade} (Nov.): tendência do modelo a recomendar itens menos populares, atribuindo pontuação tanto maior quanto menos frequente for o item no catálogo.
+    \item[e)] \textit{Recência} média (Rec.): distância temporal média, em dias (d), entre os itens recomendados e o instante da consulta.
+    \item[f)] \textit{Avaliação manual} (Manual): número de critérios atendidos, em um total de 12, três casos qualitativos avaliados manualmente, cada um com quatro critérios (aderência temática, recência, variedade e ausência de itens irrelevantes).
+\end{itemize}
+
+Em conjunto, esses indicadores permitem analisar não apenas a relevância das recomendações, mas também sua variedade, atualidade e custo de geração. No \textit{benchmark} deste trabalho, a métrica-alvo principal para a seleção do melhor modelo foi o NDCG@10, por combinar relevância e posição dos itens na lista, e as métricas de ranqueamento são reportadas nas profundidades K = 10 e K = 100. As métricas de ranqueamento (\textit{Precision@K}, \textit{Recall@K}, \textit{HitRate@K}, \textit{MAP@K}, \textit{NDCG@K} e \textit{MRR@K}), a cobertura, a diversidade e a novidade variam de 0 a 1, sendo melhores quanto mais próximas de 1, já a recência média é expressa em dias e a latência de inferência em milissegundos, ambas preferíveis quanto menores.
+
+A avaliação manual complementa as métricas automáticas com uma inspeção qualitativa reproduzível. Foram definidos três casos representativos do domínio \textit{fitness}, cada um com uma entrada fixa (\textit{tags}, instante de referência e tamanho da lista) e quatro critérios objetivos de aceitação: aderência temática, recência, variedade e ausência de itens irrelevantes. Para cada modelo, o sistema verifica automaticamente o atendimento de cada critério, resultando em uma pontuação total de 0 a 12 (três casos com quatro critérios cada). Por serem fixos, os casos e os critérios tornam essa avaliação comparável entre os modelos e as versões da base.
 
 
-\subsection{Resultados da versão inicial (SF0.1)}
 
-\textcolor{red}{PAREI AQUI. CONTINUAMOS NA REUNIÃO}
 
-Os resultados da primeira rodada, na versão \texttt{SF0.1}, estão sintetizados na Tabela \ref{tab:resultados_sf01} e funcionaram como validação técnica do protocolo, operando sobre uma amostra muito reduzida.
+\subsection{Resultados experimentais por escala da base}
+
 
 \begin{table}[H]
 \centering
 \caption{Resultados da rodada inicial na versão \texttt{SF0.1}}
 \label{tab:resultados_sf01}
 \scriptsize
-\begin{tabular}{|l|r|r|r|r|r|p{1.2cm}|}
+\begin{tabular}{|l|r|r|r|r|r|r|r|r|p{1.0cm}|}
 \hline
-\textbf{Modelo} & \textbf{NDCG@10} & \textbf{NDCG@100} & \textbf{Recall@100} & \textbf{Cob.} & \textbf{Rec. (d)} & \textbf{Manual} \\
+\textbf{Modelo} & \textbf{NDCG@10} & \textbf{NDCG@100} & \textbf{Recall@10} & \textbf{Lat.\ p95 (ms)} & \textbf{Cob.} & \textbf{Div.} & \textbf{Nov.} & \textbf{Rec. (d)} & \textbf{Manual} \\
 \hline
-Popularidade & 0,0000 & \textbf{0,1812} & \textbf{1,000} & 0,646 & 282 & N/D \\
+Popularidade & 0,0000 & \textbf{0,1812} & 0,0000 & 5,5 & 0,646 & 0,888 & 0,889 & 282 & N/D \\
 \hline
-\textit{Baseline} padrão & 0,0000 & 0,1057 & 0,667 & \textbf{0,911} & \textbf{208} & 7/12 \\
+\textit{Baseline} padrão & 0,0000 & 0,1057 & 0,0000 & 5,9 & \textbf{0,911} & 0,912 & 0,936 & \textbf{208} & 7/12 \\
 \hline
-\textit{Baseline} otimizado & 0,0000 & 0,0507 & 0,333 & 0,639 & 245 & 8/12 \\
+\textit{Baseline} otimizado & 0,0000 & 0,0507 & 0,0000 & \textbf{5,2} & 0,639 & 0,916 & \textbf{0,953} & 245 & 8/12 \\
 \hline
-LTR (\textit{LightGBMRanker}) & 0,0000 & 0,1732 & \textbf{1,000} & 0,690 & 345 & \textbf{9/12} \\
+LTR (\textit{LightGBMRanker}) & 0,0000 & 0,1732 & 0,0000 & 9,9 & 0,690 & \textbf{0,947} & 0,878 & 345 & \textbf{9/12} \\
 \hline
 \end{tabular}
 \small \\ Fonte: Elaborado pelos autores.
 \end{table}
 
-A coluna Recall mede a fração (variando de 0 até 1) de itens-alvos
-recuperados, nesse caso entre os 100 primeiro. Cobertura (Cob) e Recência média (Rec (d)) permitem analisar, respectivamente, a fração do catálogo exposta e a distância temporal média, em dias, entre o item recomendado e o instante de referência. Já a coluna Manual, mostra a taxa de critérios atendidos na avaliação manual de três casos qualitativos.
-
-Com apenas 381 interações entre 55 usuários, poucos casos têm histórico antes e depois do corte, e o NDCG@10 foi nulo em todos os modelos por insuficiência de massa. Ainda assim, o NDCG@100 indica que Popularidade e LTR recuperaram 100\% dos itens-alvo entre os 100 primeiros, mostrados na Recall. Os resultados mais consistentes são discutidos nas rodadas \texttt{SF3} e \texttt{SF30}.
-
-\subsection{Resultados da versão intermediária (SF3)}
-
-Os resultados da rodada intermediária, executada na versão \texttt{SF3}, estão sintetizados na Tabela \ref{tab:resultados_sf3}. O aumento do volume de dados em relação à versão inicial gerou um conjunto de teste com 1.663 consultas válidas, permitindo uma avaliação mais robusta.
+Na \texttt{SF0.1}, o volume é insuficiente para as métricas no topo: com apenas 6 consultas válidas, o NDCG@10 e o Recall@10 são nulos em todos os modelos. Ainda assim, o NDCG@100 já é informativo, Popularidade (0,1812) e LTR (0,1732) recuperam itens-alvo dentro das 100 primeiras posições, confirmando que a rodada cumpre seu papel de validação técnica do protocolo. Os resultados conclusivos vêm das rodadas \texttt{SF3} e \texttt{SF30}.
 
 \begin{table}[H]
 \centering
@@ -563,23 +573,7 @@ LTR (\textit{LightGBMRanker}) & 0,0016 & \textbf{0,0082} & \textbf{0,0044} & 41,
 \small \\ Fonte: Elaborado pelos autores.
 \end{table}
 
-\textcolor{red}{NDCG vai de quanto até quanto? Importante colocar isso... isso vale para todos. Além disso, qual a diferença de Recall para Recall@10? Não é igual?}
-
-\textcolor{red}{Tive dificuldade em entender essa parte dos resultados.}
-
-NDCG@10 e NDCG@100 medem a qualidade do ranqueamento em diferentes profundidades, com valores mais altos indicando melhor desempenho. A latência p95 reporta o percentil 95 do tempo de inferência, sendo desejáveis valores menores. Diversidade e novidade permitem analisar, respectivamente, a variedade temática das listas e a tendência a sugerir itens menos populares.
-
-O \textit{Baseline} otimizado obteve o melhor desempenho em NDCG@10 (0,0023), superando o \textit{Baseline} padrão (0,0010) e o LTR (0,0016), enquanto o modelo de Popularidade apresentou valor nulo. Esse resultado indica que, com o aumento do volume de consultas elegíveis, os modelos mais sofisticados passam a superar a heurística trivial de popularidade. No entanto, em NDCG@100, o LTR passa a liderar com 0,0082, o que sugere maior capacidade de recuperar itens relevantes em posições mais profundas da lista, ainda que com menor concentração no topo do ranqueamento.
-
-Os indicadores complementares mantêm o padrão observado em rodadas anteriores. O \textit{Baseline} padrão lidera em cobertura, 97,3\% do catálogo, o que reflete sua tendência a explorar amplamente o acervo. O \textit{Baseline} otimizado prioriza fortemente recência, o que é desejável para conteúdo \textit{fitness}, em que materiais recentes tendem a ser mais relevantes. O LTR atinge as maiores diversidade intra-lista (0,870) e Recall@10 (0,0044), mostrando que captura padrões temáticos mais variados que os \textit{baselines}.
-
-Em síntese, na \texttt{SF3}, o volume do conjunto de teste já permite distinguir com mais clareza os pontos fortes de cada família de modelos: o \textit{baseline} otimizado lidera no top 10, o LTR se destaca no top 100 e em diversidade, e o \textit{baseline} padrão apresenta a maior cobertura de catálogo.
-
-\subsection{Resultados da versão final (SF30)}
-
-Os resultados da rodada final, executada na versão \texttt{SF30}, estão sintetizados na Tabela \ref{tab:resultados_sf30}. Com 77.105 mensagens e 375.979 interações \textit{fitness}, cerca de dez vezes o volume da \texttt{SF3}, o protocolo temporal recuperou 21.247 consultas válidas no conjunto de teste, permitindo conclusões muito robustas a respeito do desempenho dos modelos em escala.
-
-\textcolor{red}{Mais dados ficou pior? Como assim? Qual o motivo? -- Respondido logo abaixo da tabela}
+Na \texttt{SF3}, com 1.663 consultas válidas, os modelos passam a se diferenciar. O \textit{Baseline} otimizado lidera no topo (NDCG@10 = 0,0023), superando o \textit{Baseline} padrão (0,0010) e o LTR (0,0016) e deixando a Popularidade nula; em profundidade, porém, o LTR assume a liderança (NDCG@100 = 0,0082 e Recall@10 = 0,0044), sinalizando maior capacidade de recuperar itens relevantes em posições mais distantes do topo. Nos indicadores complementares, o \textit{Baseline} padrão expõe 97,3\% do catálogo, o otimizado prioriza fortemente a recência (6 dias), desejável para conteúdo \textit{fitness}, e o LTR atinge a maior diversidade intra-lista (0,870).
 
 \begin{table}[H]
 \centering
@@ -602,13 +596,9 @@ LTR (\textit{LightGBMRanker}) & 0,0000 & 0,0000 & 0,0000 & 242,6 & 0,026 & \text
 \small \\ Fonte: Elaborado pelos autores.
 \end{table}
 
-A rodada \texttt{SF30} revela um \textit{trade-off} importante entre as famílias de modelos. Em uma escala dez vezes maior que a \texttt{SF3}, o catálogo de candidatos passa a ter 77.105 \textit{posts}, tornando substancialmente mais difícil prever a próxima interação de cada usuário. Nesse contexto, o melhor resultado em NDCG@10 foi do \textit{baseline} padrão, cerca de dez vezes inferior ao melhor resultado obtido na \texttt{SF3}. Essa queda é coerente com o aumento da dificuldade do problema, já que a expansão do catálogo reduz a chance de acerto nas primeiras posições. Ainda assim, em termos relativos, o \textit{baseline} padrão permaneceu acima do piso aleatório.
+Na \texttt{SF30}, com 21.247 consultas válidas e catálogo dez vezes maior, a tarefa torna-se substancialmente mais difícil: o melhor NDCG@10 passa a ser do \textit{Baseline} padrão (0,0002), cerca de dez vezes inferior ao melhor da \texttt{SF3}. Essa queda decorre do aumento da dificuldade, com 77.105 candidatos, é mais raro acertar a próxima interação exata no topo, e não de uma piora absoluta dos modelos; por isso o NDCG@100 oferece leitura mais estável entre escalas. Os \textit{baselines} híbridos confirmam o perfil mais adequado à produção, com cobertura próxima de 90\% (88,1\% no padrão e 89,1\% no otimizado) e baixa recência média (13 e 5 dias), enquanto o LTR mantém a maior diversidade (0,946) e a melhor avaliação manual (9/12), porém com cobertura baixa (2,6\%) e recência elevada. A latência de inferência cresce com a complexidade dos modelos: cerca de 25 ms na Popularidade, entre 114 e 121 ms nos \textit{baselines} híbridos e 243 ms no LTR, faixa já próxima do limite usualmente aceitável para sistemas interativos.
 
-Nos indicadores complementares, os \textit{baselines} híbridos confirmaram desempenho mais adequado a um cenário de produção, com cobertura próxima de 90\% do catálogo e baixa recência média. O modelo padrão alcançou 88,1\% de cobertura e 13 dias de recência média, enquanto o otimizado atingiu 89,1\% e 5 dias, respectivamente. Esses resultados sugerem maior capacidade de expor o usuário a conteúdos recentes e variados, característica importante no domínio \textit{fitness}. O LTR, embora tenha apresentado a maior diversidade e a melhor avaliação manual qualitativa, obteve cobertura baixa e recência elevada, o que restringe sua aplicação direta em produção sem ajustes adicionais.
 
-A latência de inferência cresceu com a complexidade dos modelos: 25 ms no modelo de Popularidade, entre 115 e 121 ms nos \textit{baselines} híbridos e 243 ms no LTR. Do ponto de vista prático, esse resultado mostra que o LTR já se aproxima da faixa usualmente aceitável para sistemas interativos, o que é um aspecto importante na decisão sobre implantação em produção.
-
-A queda do NDCG@10 entre \texttt{SF3} e \texttt{SF30} decorre principalmente do aumento da dificuldade da tarefa, e não de uma piora absoluta dos modelos. Com a expansão do catálogo de 7.585 para 77.105 \textit{posts}, torna-se mais difícil recuperar a próxima interação exata nas primeiras posições. Por isso, o NDCG@100 oferece uma leitura mais estável da qualidade dos modelos em diferentes escalas.
 
 \subsection{Análise comparativa entre versões}
 

@@ -33,6 +33,35 @@
   };
   const OVERALL_BEST = { scale_factor: "sf30", model_id: "ltr_lightgbm_v1_robusto" };
 
+  // Exemplos pré-prontos para demonstração/print do TCC. Apontam para o
+  // baseline híbrido padrão em sf30 (catálogo grande, recomendações coerentes).
+  // O caso "mix" inclui tags fora do vocabulário (Pizza/JavaScript) que o
+  // modelo ignora — demonstra robustez sem degradar o resultado fitness.
+  const USE_CASES = {
+    fitness_puro: {
+      scale_factor: "sf30",
+      model_id: "baseline_hibrido_padrao",
+      tags: ["The_New_Workout_Plan", "Muscle_of_Love", "The_Weight"],
+      top_k: 10,
+      user_id: null,
+      excluir_tags_exatas: false,
+    },
+    fitness_mix: {
+      scale_factor: "sf30",
+      model_id: "baseline_hibrido_padrao",
+      tags: [
+        "The_New_Workout_Plan",
+        "Muscle_of_Love",
+        "The_Weight",
+        "Pizza",
+        "JavaScript",
+      ],
+      top_k: 10,
+      user_id: null,
+      excluir_tags_exatas: false,
+    },
+  };
+
   function isBest(model) {
     return BEST_BY_SCALE[model.scale_factor] === model.model_id;
   }
@@ -203,9 +232,46 @@
     if (state.selectedTags.has(tag)) {
       state.selectedTags.delete(tag);
       chip.classList.remove("selected");
+      // chips fora do vocabulário (sintéticos) somem ao desmarcar
+      if (chip.dataset.oov === "1") chip.remove();
     } else {
       state.selectedTags.add(tag);
       chip.classList.add("selected");
+    }
+    updateTagsSummary();
+    updateRecommendButton();
+  }
+
+  function chipByTag() {
+    const map = new Map();
+    for (const chip of els.tagsContainer.querySelectorAll(".tag-chip")) {
+      map.set(chip.dataset.tag, chip);
+    }
+    return map;
+  }
+
+  // Marca um conjunto de tags. Tags que existem no vocabulário marcam o chip
+  // correspondente; tags fora do vocabulário viram um chip sintético "oov"
+  // (visível e selecionado) para aparecerem no print e serem enviadas na query.
+  function selectTags(tags) {
+    clearAllTags();
+    const existentes = chipByTag();
+    for (const tag of tags) {
+      const chip = existentes.get(tag);
+      if (chip) {
+        chip.classList.add("selected");
+      } else {
+        const oovChip = document.createElement("button");
+        oovChip.type = "button";
+        oovChip.className = "tag-chip oov selected";
+        oovChip.dataset.tag = tag;
+        oovChip.dataset.oov = "1";
+        oovChip.textContent = tag;
+        oovChip.title = "Tag fora do vocabulário do modelo (será ignorada na recomendação)";
+        oovChip.addEventListener("click", () => toggleTag(tag, oovChip));
+        els.tagsContainer.appendChild(oovChip);
+      }
+      state.selectedTags.add(tag);
     }
     updateTagsSummary();
     updateRecommendButton();
@@ -241,10 +307,46 @@
   function clearAllTags() {
     state.selectedTags.clear();
     for (const chip of els.tagsContainer.querySelectorAll(".tag-chip")) {
-      chip.classList.remove("selected");
+      if (chip.dataset.oov === "1") {
+        chip.remove();
+      } else {
+        chip.classList.remove("selected");
+      }
     }
     updateTagsSummary();
     updateRecommendButton();
+  }
+
+  // Aplica um exemplo pré-pronto: seleciona o modelo, carrega suas tags e
+  // preenche tags/opções. NÃO dispara a recomendação (o usuário clica depois).
+  async function applyUseCase(caseId) {
+    const uc = USE_CASES[caseId];
+    if (!uc) return;
+
+    const alvo = state.models.find(
+      (m) => m.scale_factor === uc.scale_factor && m.model_id === uc.model_id,
+    );
+    if (!alvo) {
+      showToast(
+        `Modelo do exemplo indisponível (${uc.scale_factor} / ${uc.model_id}). Treine-o ou escolha outro.`,
+      );
+      return;
+    }
+
+    if (els.modelSelect.value !== alvo.model_dir) {
+      els.modelSelect.value = alvo.model_dir;
+      await onModelChange();
+    }
+    if (!state.tagsInfo) {
+      showToast("Não foi possível carregar as tags do modelo do exemplo.");
+      return;
+    }
+
+    els.topK.value = String(uc.top_k);
+    els.userId.value = uc.user_id == null ? "" : String(uc.user_id);
+    els.excluirExatas.checked = !!uc.excluir_tags_exatas;
+    selectTags(uc.tags);
+    showToast("Exemplo carregado. Clique em Recomendar.", "info");
   }
 
   async function runRecommend() {
@@ -404,6 +506,10 @@
   els.tagSearch.addEventListener("input", applyTagFilter);
   els.clearTags.addEventListener("click", clearAllTags);
   els.recommendBtn.addEventListener("click", runRecommend);
+
+  for (const btn of document.querySelectorAll(".use-case-btn")) {
+    btn.addEventListener("click", () => applyUseCase(btn.dataset.case));
+  }
 
   loadModels();
 })();
