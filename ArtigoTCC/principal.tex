@@ -187,9 +187,9 @@ O ambiente computacional do projeto foi organizado principalmente em Python 3.11
 
 Para a construção do modelo híbrido de referência, utilizou-se a biblioteca scikit-learn \cite{pedregosa2011scikit}, especialmente na vetorização binária das \textit{tags}. Na etapa de aprendizado para ranqueamento, foi empregado o \textit{LightGBMRanker}, disponível na biblioteca LightGBM \cite{Ke2017LightGBM}. Além disso, para representar semanticamente as \textit{tags}, utilizou-se a biblioteca \textit{sentence-transformers}, com o modelo pré-treinado \texttt{all-MiniLM-L6-v2}, responsável por gerar vetores densos de 384 dimensões a partir dos nomes dessas \textit{tags}. Esses vetores foram incorporados como atributos adicionais no \textit{LightGBMRanker}.
 
-\textcolor{red}{Os conjuntos de treino, validação e teste não são parte dos materiais e sim da metodologia. Sugiro ajustar esse parágrafo para não citar isso e deixar para colocar isso em método.}
+% \textcolor{red}{Os conjuntos de treino, validação e teste não são parte dos materiais e sim da metodologia. Sugiro ajustar esse parágrafo para não citar isso e deixar para colocar isso em método.}
 
-Como materiais intermediários do estudo, foram produzidos artefatos derivados da base inicial e os conjuntos de treino, validação e teste. Esses arquivos compõem a base efetiva sobre a qual os modelos são treinados e avaliados. Entre os principais artefatos, destacam-se:
+Como materiais intermediários do estudo, foram produzidos artefatos derivados da base inicial. Esses arquivos compõem a base efetiva sobre a qual os modelos são treinados e avaliados. Entre os principais artefatos, destacam-se:
 
 \begin{itemize}
     \item[a)] \texttt{messages\_fitness.parquet}: metadados das publicações e comentários \textit{fitness} (data de criação, tamanho do texto e \textit{tags}).
@@ -358,7 +358,7 @@ O catálogo de \textit{posts} foi mantido nos três conjuntos, variando apenas o
 
 \subsubsection{Etapa 3: Treinamento dos modelos}
 
-\textcolor{red}{Esses são os nomes dos modelos?} \textcolor{blue}{Sim, são os nomes das quatro configurações do \textit{benchmark} usadas nas tabelas de resultados.}
+% \textcolor{red}{Esses são os nomes dos modelos?} \textcolor{blue}{Sim, são os nomes das quatro configurações do \textit{benchmark} usadas nas tabelas de resultados.}
 
 Nesta etapa, envolve o treinamento dos modelos do benchmark que foram treinadas em quatro configurações de modelos: um \textit{baseline} de popularidade, duas variantes de um modelo híbrido de referência e uma abordagem de aprendizado para ranqueamento. Cada uma dessas configurações foi incluída para atender a um objetivo específico do estudo e servir como base comparativa na análise dos resultados.
 
@@ -450,17 +450,15 @@ Por fim, um orquestrador foi utilizado para organizar os experimentos em termos 
 
 \subsection{Protocolo e métricas de avaliação}
 
-\textcolor{red}{Fiquei com dúvidas sobre essa avaliação offline. Conversamos na reunião.}
 
-A avaliação em modo \textit{offline} é feita com dados que separamos previamente, em vez de testar com usuários reais. A vantagem é poder comparar os modelos de forma justa, todos nas mesmas condições, e repetir o experimento quantas vezes for preciso.
+A avaliação em modo \textit{offline} é feita com dados que foram separados previamente, em vez de testar com usuários reais. A vantagem dessa abordagem é poder comparar os modelos de forma justa, todos nas mesmas condições, e repetir o experimento quantas vezes for preciso.
 
-A ideia central é simples, escolhemos um instante na linha do tempo de cada usuário e dividimos o histórico dele em duas partes, o que ele já tinha acessado antes e o que viria a acessar depois. O modelo recebe apenas a parte de antes, que são as \textit{tags} e o horário da atividade mais recente, e com isso, monta uma lista de recomendações a partir de todo o catálogo. Em seguida, comparamos essa lista com a parte futura, que funciona como gabarito, quanto mais itens da lista o usuário realmente acessou depois, melhor o modelo. Para que o teste seja justo, o modelo nunca enxerga o futuro, e itens que o usuário já tinha visto são retirados da lista.
+Foi escolhido um instante na linha do tempo de cada usuário e dividido o histórico dele em duas partes, o que ele já tinha acessado antes e o que viria a acessar depois. O modelo recebe apenas a parte de antes, que são as \textit{tags} e o horário da atividade mais recente, e com isso, monta uma lista de recomendações a partir de todo o catálogo. Em seguida, essa lista foi comparada com a parte futura, que funciona como gabarito, quanto mais itens da lista o usuário realmente acessou depois, melhor o modelo. Para que o teste seja justo, o modelo nunca enxerga o futuro, e itens que o usuário já tinha visto são retirados da lista. \textcolor{red}{Tenta ilustrar com uma figura, exemplo do estilo do grafico do blocked cross validation, professor sugeriu uma figurazona com tudo}
 
-Nem todo usuário entra nessa conta, só é possível avaliar quem tem atividade antes e depois do instante escolhido. Por isso, o número de consultas avaliadas muda conforme a versão da base. Como medida de relevância, contamos como acerto o item que o usuário de fato acessou depois. É uma aproximação prática e amplamente adotada na avaliação \textit{offline} de modelos de recomendações \cite{10.1145/963770.963772}, mas não capta tudo, por exemplo, se a pessoa gostou da recomendação ou descobriu algo novo depois. Medir isso exigiria testes com usuários reais, avaliação \textit{online}, o que fica como trabalho futuro.
+Nem todo usuário entra nessa conta, só é possível avaliar quem tem atividade antes e depois do instante escolhido. Por isso, o número de consultas avaliadas muda conforme a versão da base. Como medida de relevância, é contabilizado como acerto o item que o usuário de fato acessou depois. É uma aproximação prática e amplamente adotada na avaliação \textit{offline} de modelos de recomendações \cite{10.1145/963770.963772}, mas não capta tudo, por exemplo, se a pessoa gostou da recomendação ou descobriu algo novo depois. Medir isso exigiria testes com usuários reais, avaliação \textit{online}, o que fica como trabalho futuro.
 
 A Figura \ref{fig:fluxo_avaliacao} resume o fluxo de agrupar as interações por usuário, ordená-las no tempo, separar a referência do gabarito, gerar o Top-K e calcular as métricas.
 
-\textcolor{red}{... não ficou legal}
 
 \begin{figure}[H]
 \centering
@@ -477,12 +475,12 @@ A Figura \ref{fig:fluxo_avaliacao} resume o fluxo de agrupar as interações por
 \node[iobox] (entrada) {Conjunto de teste};
 \node[box, right=of entrada] (grupo) {Agrupar interações por usuário};
 \node[box, right=of grupo] (ordena) {Ordenar interações cronologicamente};
-\node[box, right=of ordena] (ref) {Define a referência};
+\node[box, right=of ordena] (ref) {Define a referência temporal};
 
 % Linha de baixo (direita -> esquerda)
 \node[box, below=of ref] (gab) {Define o gabarito};
 \node[box, left=of gab] (topk) {Modelo gera Top-K recomendações};
-\node[box, left=of topk] (metricas) {Calcular NDCG@K, Recall@K, $\dots$};
+\node[box, left=of topk] (metricas) {Calcular métricas};
 \node[iobox, left=of metricas] (saida) {Média das métricas sobre as consultas};
 
 \draw[arrow] (entrada) -- (grupo);
@@ -497,10 +495,10 @@ A Figura \ref{fig:fluxo_avaliacao} resume o fluxo de agrupar as interações por
 \small \\ Fonte: Elaborado pelos autores.
 \end{figure}
 
-Para mensurar a qualidade do ranqueamento, foram adotadas métricas que consideram tanto a presença de itens relevantes quanto sua posição na lista recomendada, com de profundidades K = 10 e K = 100. São elas:
+Para mensurar a qualidade do ranqueamento, foram adotadas métricas que consideram tanto a presença de itens relevantes quanto sua posição na lista recomendada, com profundidades K = 10 e K = 100. São elas:
 
 \begin{itemize}
-    \item[a)] \textit{NDCG@K}, ou ganho acumulado descontado normalizado, valoriza mais os itens relevantes que aparecem nas primeiras posições da lista.
+    \item[a)] \textit{NDCG@K}, ou ganho acumulado descontado normalizado (\textit{Normalized Discounted Cumulative Gain}), valoriza mais os itens relevantes que aparecem nas primeiras posições da lista.
     \item[b)] \textit{Recall@K} mede a proporção dos itens relevantes que foi recuperada entre os K primeiros resultados.
 \end{itemize}
 
@@ -515,7 +513,7 @@ Além das métricas de ranqueamento, a avaliação incluiu indicadores de intere
     \item[f)] \textit{Avaliação manual} (Manual): quantidade de critérios atendidos, considerando os 12 critérios de avaliação, agrupados em três casos qualitativos de quatro critérios cada
 \end{itemize}
 
-Em conjunto, esses indicadores permitem analisar não apenas a relevância das recomendações, mas também sua variedade e custo de geração. No \textit{benchmark} deste trabalho, a métrica-alvo para a seleção do melhor modelo foi o NDCG@10, por combinar relevância e posição dos itens na lista. As métricas de ranqueamento, a cobertura, a diversidade e a novidade variam de 0 a 1, sendo melhores resultados mais próximos de 1. Já a recência média e a latência de inferência, ambas preferíveis valores baixos.
+Em conjunto, esses indicadores permitem analisar não apenas a relevância das recomendações, mas também sua variedade e custo de geração. No \textit{benchmark} deste trabalho, a métrica-alvo para a seleção do melhor modelo foi o NDCG@10, por combinar relevância e posição dos itens na lista. As métricas de ranqueamento, a cobertura, a diversidade e a novidade variam de 0 a 1, sendo melhores resultados mais próximos de 1. Já a recência média em dias e a latência de inferência em milissegundos, ambas preferíveis valores baixos.
 
 Para a avaliação Manual foram definidos três casos representativos do domínio \textit{fitness}, cada um com uma entrada fixa, que são as \textit{tags}, instante de referência e tamanho da lista e quatro critérios objetivos de aceitação, aderência temática, recência, variedade e ausência de itens irrelevantes. Para cada modelo, o sistema verifica o atendimento de cada critério, resultando em uma pontuação total de 0 a 12, três casos com quatro critérios cada. Por serem fixos, os casos e os critérios tornam essa avaliação comparável entre os modelos e as versões da base.
 
@@ -545,6 +543,8 @@ LTR (\textit{LightGBMRanker}) & 0,0000 & 0,1732 & 0,0000 & 9,9 & 0,690 & \textbf
 \end{tabular}
 \small \\ Fonte: Elaborado pelos autores.
 \end{table}
+
+\textcolor{red}{Tenta ilustrar com uma figura, exemplo do estilo do grafico do blocked cross validation, professor sugeriu uma figurazona com tudo, COLOCAR HIT RATE, E NO SIMULADOR WEB, COLOCAR }
 
 Na \texttt{SF0.1}, o volume de dados é insuficiente para avaliar adequadamente as métricas de topo do ranking. Como existem apenas 6 consultas válidas, os valores de NDCG@10 e Recall@10 são nulos para todos os modelos. Ainda assim, o NDCG@100 fornece informações relevantes, pois os modelos de Popularidade (0,1812) e LTR (0,1732) conseguem recuperar os itens-alvo entre as 100 primeiras posições. Esse resultado demonstra que a rodada cumpre seu objetivo de validação técnica do protocolo experimental. Portanto, as análises mais robustas e conclusivas concentram-se nas rodadas \texttt{SF3} e \texttt{SF30}.
 
