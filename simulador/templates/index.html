@@ -30,6 +30,10 @@
           <span class="use-case-title">Fitness + termos fora do tema</span>
           <span class="use-case-desc">As mesmas tags + Pizza e JavaScript (ignoradas pelo modelo)</span>
         </button>
+        <button type="button" class="use-case-btn" data-case="fitness_descoberta">
+          <span class="use-case-title">Treino variado (novidade + recência)</span>
+          <span class="use-case-desc">Tags: The_New_Workout_Plan · Carry_That_Weight · Bicycle_Race</span>
+        </button>
       </div>
     </section>
 
@@ -40,7 +44,6 @@
       <select id="model-select" disabled>
         <option>Carregando modelos…</option>
       </select>
-      <p class="legend">🏆 melhor modelo geral do benchmark · ⭐ melhor modelo no dataset</p>
       <div id="model-info" class="model-info"></div>
     </section>
 
@@ -90,7 +93,15 @@
 
     <section class="card results">
       <header class="results-header">
-        <h2>Recomendações</h2>
+        <h2>
+          Recomendações
+          <button
+            type="button"
+            class="info-icon"
+            aria-label="O que é o número ao lado de cada recomendação"
+            data-tooltip="O número ao lado de cada item é o score de relevância calculado pelo modelo, em uma escala de 0 a 1. Quanto maior, mais o post combina com as tags escolhidas, considerando similaridade de conteúdo, coocorrência de tags, recência, popularidade e sinal social. Ele serve para ordenar a lista e não é uma porcentagem de acerto nem uma probabilidade."
+          >i</button>
+        </h2>
         <span id="results-meta" class="results-meta"></span>
       </header>
       <div id="results-container">

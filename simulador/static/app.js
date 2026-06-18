@@ -23,15 +23,57 @@
     ltr_lightgbm: "LTR (LightGBM)",
   };
 
-  // Melhor modelo por dataset segundo o benchmark TCC (resumo_benchmark_3_versoes.md):
-  // - SF30: ltr_lightgbm_v1_robusto (NDCG@10 = 0.0009, melhor Recall@10)
-  // - SF3:  ltr_lightgbm_v1_core    (NDCG@10 = 0.0008, melhor Recall@10)
-  // - SF0.1: sem queries válidas no benchmark — sem destaque.
-  const BEST_BY_SCALE = {
-    sf30: "ltr_lightgbm_v1_robusto",
-    sf3: "ltr_lightgbm_v1_core",
+  // Métricas de avaliação offline do artigo (ranqueamento completo do catálogo),
+  // por escala da base e por modelo. ndcg100 = NDCG@100; tema100 = acerto
+  // temático@100 (item recomendado compartilha tema com o consumido depois,
+  // Jaccard das tags >= 0,5). São valores precomputados no benchmark — o
+  // simulador não os recalcula, apenas exibe como referência do modelo.
+  const BENCH_METRICS = {
+    "sf0.1": {
+      popularity: { ndcg100: 0.1812, tema100: 1 },
+      baseline_padrao: { ndcg100: 0.1057, tema100: 1 },
+      baseline_otimizado: { ndcg100: 0.0507, tema100: 1 },
+      ltr: { ndcg100: 0.1732, tema100: 1 },
+    },
+    sf3: {
+      popularity: { ndcg100: 0.0003, tema100: 0.157 },
+      baseline_padrao: { ndcg100: 0.0035, tema100: 0.103 },
+      baseline_otimizado: { ndcg100: 0.0032, tema100: 0.662 },
+      ltr: { ndcg100: 0.0082, tema100: 0.5 },
+    },
+    sf30: {
+      popularity: { ndcg100: 0, tema100: 0.666 },
+      baseline_padrao: { ndcg100: 0.0004, tema100: 0.116 },
+      baseline_otimizado: { ndcg100: 0.0002, tema100: 0.083 },
+      ltr: { ndcg100: 0, tema100: 0.773 },
+    },
   };
-  const OVERALL_BEST = { scale_factor: "sf30", model_id: "ltr_lightgbm_v1_robusto" };
+
+  // Resolve a "variante" de métrica a partir da família + id do modelo, para
+  // ser robusto a sufixos de versão (ex.: ltr_lightgbm_v1_core / _robusto).
+  function benchVariant(model) {
+    if (model.family === "popularity") return "popularity";
+    if (model.family === "ltr_lightgbm") return "ltr";
+    if (model.family === "baseline_hibrido") {
+      return /otimiz/i.test(model.model_id)
+        ? "baseline_otimizado"
+        : "baseline_padrao";
+    }
+    return null;
+  }
+
+  function getBenchMetrics(model) {
+    const scale = (model.scale_factor || "").toLowerCase();
+    const variant = benchVariant(model);
+    const porEscala = BENCH_METRICS[scale];
+    if (!porEscala || !variant) return null;
+    return porEscala[variant] || null;
+  }
+
+  // Formata número no padrão pt-BR com casas fixas (ex.: 0,0004).
+  function fmtMetric(value, casas) {
+    return Number(value).toFixed(casas).replace(".", ",");
+  }
 
   // Exemplos pré-prontos para demonstração/print do TCC. Apontam para o
   // baseline híbrido padrão em sf30 (catálogo grande, recomendações coerentes).
@@ -60,17 +102,18 @@
       user_id: null,
       excluir_tags_exatas: false,
     },
+    // Demonstra novidade + recência + relevância ao mesmo tempo: a maioria dos
+    // posts recomendados traz uma tag escolhida (verde = relevância) somada a uma
+    // tag relacionada nova (ex.: The_Weight = novidade), com datas recentes.
+    fitness_descoberta: {
+      scale_factor: "sf30",
+      model_id: "baseline_hibrido_padrao",
+      tags: ["The_New_Workout_Plan", "Carry_That_Weight", "Bicycle_Race"],
+      top_k: 10,
+      user_id: null,
+      excluir_tags_exatas: false,
+    },
   };
-
-  function isBest(model) {
-    return BEST_BY_SCALE[model.scale_factor] === model.model_id;
-  }
-  function isOverallBest(model) {
-    return (
-      model.scale_factor === OVERALL_BEST.scale_factor &&
-      model.model_id === OVERALL_BEST.model_id
-    );
-  }
 
   const state = {
     models: [],
@@ -137,13 +180,9 @@
         const opt = document.createElement("option");
         opt.value = m.model_dir;
         const family = FAMILY_LABEL[m.family] || m.family;
-        let prefix = "";
-        if (isOverallBest(m)) prefix = "🏆 ";
-        else if (isBest(m)) prefix = "⭐ ";
-        opt.textContent = `${prefix}${m.model_id} — ${family}`;
+        opt.textContent = `${m.model_id} — ${family}`;
         opt.dataset.scaleFactor = m.scale_factor || "";
         opt.dataset.family = m.family;
-        if (isBest(m)) opt.classList.add("best-option");
         og.appendChild(opt);
       }
       frag.appendChild(og);
@@ -173,19 +212,25 @@
 
     const m = state.selectedModel;
     const family = FAMILY_LABEL[m.family] || m.family;
-    let badge = "";
-    if (isOverallBest(m)) {
-      badge = '<span class="best-badge overall">🏆 Melhor modelo do benchmark TCC</span>';
-    } else if (isBest(m)) {
-      badge = `<span class="best-badge">⭐ Melhor modelo em ${m.scale_factor.toUpperCase()}</span>`;
-    }
+    const bench = getBenchMetrics(m);
+    const benchHtml = bench
+      ? `<div class="model-metrics" title="Métricas da avaliação offline do artigo (ranqueamento completo do catálogo). Acerto temático = item recomendado compartilha tema com o consumido depois, com Jaccard das tags >= 0,5.">` +
+        `<span class="metrics-title">📊 Avaliação offline (${m.scale_factor.toUpperCase()})</span>` +
+        `<span class="metric-chip">NDCG@100: <strong>${fmtMetric(bench.ndcg100, 4)}</strong></span>` +
+        `<span class="metric-chip">Acerto temático@100: <strong>${fmtMetric(bench.tema100, 3)}</strong></span>` +
+        `</div>`
+      : "";
+
     els.modelInfo.innerHTML =
-      badge +
       `<div><strong>${family}</strong> · ${m.n_posts.toLocaleString("pt-BR")} posts no catálogo · ` +
       `${m.n_tags} tags · dataset <code>${m.dataset_key}</code></div>` +
-      (m.descricao ? `<em>${escapeHtml(m.descricao)}</em>` : "");
+      (m.descricao ? `<em>${escapeHtml(m.descricao)}</em>` : "") +
+      benchHtml;
 
-    // limpa seleção ao trocar modelo (vocabulários podem diferir)
+    // preserva as tags selecionadas ao trocar de modelo; serão reaplicadas
+    // sobre o vocabulário do novo modelo (tags fora do vocabulário viram chips
+    // "oov", mantendo a seleção do usuário).
+    const tagsPrevias = [...state.selectedTags];
     state.selectedTags = new Set();
     els.tagsContainer.innerHTML = '<p class="placeholder">Carregando tags…</p>';
     els.recommendBtn.disabled = true;
@@ -197,6 +242,7 @@
       state.tagsInfo = data;
       state.tags = data.tags || [];
       renderTags();
+      if (tagsPrevias.length > 0) selectTags(tagsPrevias);
       updateRecommendButton();
     } catch (err) {
       showToast(`Erro ao carregar tags: ${err.message}`);
