@@ -224,6 +224,7 @@ def avaliar(
     *,
     bootstrap_iters: int = 1000,
     bootstrap_seed: int = 42,
+    tema_jaccard: float = 0.5,
 ) -> tuple[dict, pd.DataFrame, pd.DataFrame]:
     test_interactions = load_split_interactions(splits_dir, "test")
     queries, diagnostico_queries = build_future_queries_with_diagnostics(
@@ -232,6 +233,12 @@ def avaliar(
     strategy_info = load_split_strategy(splits_dir)
 
     catalogo_total = len(ranker.artifacts.posts_cache)
+    posts_cache_tema = ranker.artifacts.posts_cache
+    mid_to_tags: dict[int, set[str]] = {}
+    if "_message_id" in posts_cache_tema.columns and "tags_fitness" in posts_cache_tema.columns:
+        for _mid, _tags in zip(posts_cache_tema["_message_id"], posts_cache_tema["tags_fitness"]):
+            if pd.notna(_mid):
+                mid_to_tags[int(_mid)] = set(_parse_tags(_tags))
     uso_catalogo = set()
     ilads = []
     novidades = []
@@ -249,6 +256,7 @@ def avaliar(
 
     linhas_q = []
     acumuladores = {k: defaultdict(list) for k in ks}
+    acumuladores_tema = {k: defaultdict(list) for k in ks}
 
     pop = Counter(test_interactions["message_id"].tolist())
 
@@ -306,6 +314,23 @@ def avaliar(
                 )
                 acumuladores[k]["mrr"].append(mrr_at_k(query.future_ids, rec_ids_message, k))
 
+            tags_relevantes: set[str] = set()
+            for fid in query.future_ids:
+                tags_relevantes |= mid_to_tags.get(int(fid), set())
+            hits_tema = []
+            for tags_item in rec_tags:
+                conjunto_item = set(tags_item)
+                uniao = conjunto_item | tags_relevantes
+                jaccard = (len(conjunto_item & tags_relevantes) / len(uniao)) if uniao else 0.0
+                hits_tema.append(1.0 if jaccard >= tema_jaccard else 0.0)
+            for k in ks:
+                topk_tema = hits_tema[:k]
+                acumuladores_tema[k]["precision"].append(sum(topk_tema) / k if k else 0.0)
+                acumuladores_tema[k]["hitrate"].append(1.0 if any(topk_tema) else 0.0)
+                dcg_tema = sum(g / np.log2(i + 2) for i, g in enumerate(topk_tema))
+                idcg_tema = sum(1.0 / np.log2(i + 2) for i in range(k))
+                acumuladores_tema[k]["ndcg"].append(dcg_tema / idcg_tema if idcg_tema else 0.0)
+
             linhas_q.append(
                 {
                     "user_id": int(query.user_id),
@@ -352,6 +377,14 @@ def avaliar(
             )
         resumo_metricas.update(metricas_k)
 
+    for k in ks:
+        for nome in ["precision", "hitrate", "ndcg"]:
+            valores_tema = acumuladores_tema[k][nome]
+            resumo_metricas[f"{nome}_tema@{k}"] = (
+                float(np.mean(valores_tema)) if valores_tema else 0.0
+            )
+        resumo_metricas[f"acertos_tema@{k}"] = int(sum(acumuladores_tema[k]["hitrate"]))
+
     cobertura = len(uso_catalogo) / catalogo_total if catalogo_total > 0 else 0.0
 
     resumo_negocio = {
@@ -391,6 +424,7 @@ def avaliar(
         "cut_val_test_ms": strategy_info.get("cut_val_test_ms"),
         "leave_last_k": strategy_info.get("leave_last_k"),
         "bootstrap_iters": int(bootstrap_iters),
+        "tema_jaccard_threshold": float(tema_jaccard),
     }
 
     resumo = {
@@ -513,6 +547,12 @@ def main() -> None:
         default=42,
         help="Seed do bootstrap.",
     )
+    parser.add_argument(
+        "--tema-jaccard",
+        type=float,
+        default=0.5,
+        help="Limiar de Jaccard de tags para acerto na relevância temática (default 0,5).",
+    )
     args = parser.parse_args()
 
     ks = _normalizar_k(args.k)
@@ -536,6 +576,7 @@ def main() -> None:
         output_dir,
         bootstrap_iters=max(0, int(args.bootstrap_iters)),
         bootstrap_seed=int(args.bootstrap_seed),
+        tema_jaccard=float(args.tema_jaccard),
     )
     caminho_json, caminho_csv, caminho_md = salvar_resultados(
         resumo, df_metricas, df_queries, out_dir
